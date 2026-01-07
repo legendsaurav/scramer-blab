@@ -40,6 +40,11 @@ function App() {
     run();
     return () => { cancelled = true; };
   }, []);
+  
+  // Optional: run a quick connectivity check in production
+  if (isSupabaseConfigured) {
+    diagnoseSupabaseConnectivity();
+  }
 
   // Dark mode
   useEffect(() => {

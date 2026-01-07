@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import { isSupabaseConfigured, diagnoseSupabaseConnectivity } from './lib/supabase';
 import { AppState, ViewState, Project } from './types';
 import { MOCK_MEETINGS, MOCK_SESSIONS, MOCK_CHAT, MOCK_ANNOUNCEMENTS } from './constants';
 import Layout from './components/Layout';

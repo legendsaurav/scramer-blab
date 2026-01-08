@@ -37,6 +37,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   const [liveSessions, setLiveSessions] = useState<SoftwareSession[]>(sessions);
   const [isPostingAnnouncement, setIsPostingAnnouncement] = useState(false);
   const [announcementInput, setAnnouncementInput] = useState('');
+  const announcementLength = announcementInput.trim().length;
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [notification, setNotification] = useState<{message: string, type: 'info' | 'success'} | null>(null);
   const { extensionStatus, startSession } = useExtensionBridge();
@@ -320,7 +321,13 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
                  {!showConfirmation ? (
                    <>
                     <textarea value={announcementInput} onChange={(e) => setAnnouncementInput(e.target.value)} placeholder="Define protocol update..." className="w-full h-40 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-base font-medium outline-none resize-none dark:text-white" />
-                    <button onClick={() => setShowConfirmation(true)} disabled={!announcementInput.trim()} className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl">Establish Protocol</button>
+                    <div className="flex items-center justify-between mt-2 text-xs">
+                      <span className="text-slate-500 dark:text-slate-400">{announcementLength} characters</span>
+                      {announcementLength > 0 && announcementLength < 2 && (
+                        <span className="text-amber-600 dark:text-amber-400">Broadcast needs at least 2 characters</span>
+                      )}
+                    </div>
+                    <button onClick={() => setShowConfirmation(true)} disabled={announcementLength < 2} className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl disabled:opacity-60 disabled:cursor-not-allowed">Establish Protocol</button>
                    </>
                  ) : (
                    <div className="py-6 text-center">

@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Schmer Recorder",
+  "version": "1.0.0",
+  "description": "Records sessions and bridges SCHMER_* protocol to your site.",
+  "permissions": ["scripting", "activeTab"],
+  "host_permissions": [
+    "https://scramer-blab.vercel.app/*",
+    "http://localhost:5173/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://scramer-blab.vercel.app/*",
+        "http://localhost:5173/*"
+      ],
+      "js": ["content-script.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Schmer Recorder"
+  }
+}

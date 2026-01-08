@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Schmer Test Harness</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; }
+      button { margin-right: .5rem; padding: .5rem 1rem; }
+      .log { margin-top: 1rem; background: #111; color: #eee; padding: 1rem; height: 300px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .ok { color: #7CFC00; }
+      .warn { color: #FFD700; }
+      .err { color: #FF5555; }
+    </style>
+  </head>
+  <body>
+    <h1>Schmer ↔ Extension Test</h1>
+    <div>
+      <button id="ping">Ping</button>
+      <button id="start">Start Recording</button>
+      <button id="stop">Stop & Upload</button>
+    </div>
+    <pre class="log" id="log"></pre>
+
+    <script>
+      const logEl = document.getElementById('log');
+      const log = (cls, ...args) => {
+        const div = document.createElement('div');
+        div.className = cls || '';
+        div.textContent = `[${new Date().toLocaleTimeString()}] ` + args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+        logEl.appendChild(div);
+        logEl.scrollTop = logEl.scrollHeight;
+      };
+
+      function post(type, payload) {
+        window.postMessage({ type, payload }, '*');
+      }
+
+      window.addEventListener('message', (e) => {
+        const { type, payload, version, blob, filename } = e.data || {};
+        if (!type || !String(type).startsWith('SCHMER_')) return;
+        log('ok', '←', type, payload || version || '');
+        if (type === 'SCHMER_RECORDING_READY' && blob) {
+          // Demo: preview size and offer download as a fallback
+          log('warn', `Blob received: ${blob.size} bytes, filename: ${filename}`);
+          const a = document.createElement('a');
+          a.download = filename || 'recap.webm';
+          a.href = URL.createObjectURL(blob);
+          a.textContent = 'Download recap (fallback)';
+          a.style.display = 'inline-block';
+          a.style.marginTop = '8px';
+          document.body.appendChild(a);
+        }
+      });
+
+      document.getElementById('ping').onclick = () => post('SCHMER_PING');
+      document.getElementById('start').onclick = () => post('SCHMER_START_RECORDING', { projectId: 'demo-project', tool: 'VS Code', options: { displayMode: 'screen', includeAudio: true, includeMicrophone: true, toolUrl: 'https://code.visualstudio.com/' } });
+      document.getElementById('stop').onclick = () => post('SCHMER_STOP_RECORDING');
+
+      // Auto-ping initially
+      post('SCHMER_PING');
+    </script>
+  </body>
+</html>

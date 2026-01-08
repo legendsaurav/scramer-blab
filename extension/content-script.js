@@ -8,6 +8,7 @@
   }
 
   // Immediately announce presence
+  console.log("[schmer-ext] content-script injected");
   post("SCHMER_PONG", { version: "1.0.0" });
 
   function pickMime() {
@@ -64,6 +65,7 @@
     };
 
     mediaRecorder.onstop = () => {
+      console.log("[schmer-ext] recording stopped, chunks:", chunks.length);
       try {
         const blob = new Blob(chunks, { type: mime || "video/webm" });
         const blobUrl = URL.createObjectURL(blob);
@@ -79,6 +81,7 @@
     };
 
     mediaRecorder.start(1000); // gather chunks every second
+    console.log("[schmer-ext] recording started");
   }
 
   function stopRecording() {
@@ -88,6 +91,7 @@
       mediaRecorder.stop();
       mediaRecorder.stream.getTracks().forEach(t => t.stop());
     } catch {}
+    console.log("[schmer-ext] stopRecording invoked");
   }
 
   // Listen to page → extension messages
@@ -98,17 +102,21 @@
 
     switch (msg.type) {
       case "SCHMER_PING":
+        console.log("[schmer-ext] <- SCHMER_PING");
         post("SCHMER_PONG", { version: "1.0.0" });
         break;
       case "SCHMER_START_RECORDING":
+        console.log("[schmer-ext] <- SCHMER_START_RECORDING", msg.payload);
         try {
           await startRecording(msg.payload || {});
           post("SCHMER_RECORDING_STARTED", { tool: msg.payload?.tool, startTime: Date.now() });
         } catch (e) {
+          console.error("[schmer-ext] startRecording error", e);
           post("SCHMER_ERROR", { message: String(e?.message || e || "Failed to start recording") });
         }
         break;
       case "SCHMER_STOP_RECORDING":
+        console.log("[schmer-ext] <- SCHMER_STOP_RECORDING");
         stopRecording();
         post("SCHMER_RECORDING_STOPPED", {});
         break;

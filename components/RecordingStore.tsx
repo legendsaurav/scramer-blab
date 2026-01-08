@@ -3,6 +3,8 @@ import { SOFTWARE_TOOLS } from '../constants';
 import { SoftwareType } from '../types';
 import ToolIcon from './ToolIcon';
 import { Layers, MonitorPlay, ExternalLink, ChevronDown, DownloadCloud } from 'lucide-react';
+import { toMergedSessions } from '../lib/localRecordingStore';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 type MergedSession = { tool: string; date: string; paths: Record<string,string> };
 
@@ -17,16 +19,50 @@ const RecordingStore: React.FC<{ projectId: string }> = ({ projectId }) => {
     const raw = (import.meta as any)?.env?.VITE_BACKEND_URL as string | undefined;
     const isHttpsPage = typeof window !== 'undefined' && window.location.protocol === 'https:';
     const backendUrl = raw && (isHttpsPage && raw.startsWith('http://') ? undefined : raw);
-    if (!backendUrl || !projectId) return;
-    const refresh = () => {
-      fetch(`${backendUrl}/sessions?projectId=${encodeURIComponent(projectId)}`, { mode: 'cors' })
-        .then(r => r.json())
-        .then((json) => {
-          if (json?.ok && Array.isArray(json.sessions)) {
-            setMergedSessions(json.sessions as MergedSession[]);
+    if (!projectId) return;
+    const refresh = async () => {
+      const local = await toMergedSessions(projectId).catch(() => []);
+      let supa: MergedSession[] = [];
+      if (isSupabaseConfigured && supabase) {
+        try {
+          // Storage-only listing. Path schema: <projectId>/<tool>/<YYYY-MM-DD>/<sessionId>.webm
+          const tools = SOFTWARE_TOOLS.map(t => t.id as unknown as string);
+          const out: MergedSession[] = [];
+          for (const tool of tools) {
+            // list date folders under projectId/tool
+            const { data: dateEntries } = await (supabase as any).storage.from('recordings').list(`${projectId}/${tool}`, { limit: 1000, sortBy: { column: 'name', order: 'desc' } });
+            if (!Array.isArray(dateEntries)) continue;
+            for (const d of dateEntries) {
+              const date = (d.name || '').replace(/\/$/, '');
+              // list files under each date folder
+              const { data: files } = await (supabase as any).storage.from('recordings').list(`${projectId}/${tool}/${date}`, { limit: 1000, sortBy: { column: 'name', order: 'desc' } });
+              if (!Array.isArray(files)) continue;
+              for (const f of files) {
+                const path = `${projectId}/${tool}/${date}/${f.name}`;
+                if (!/\.webm$/i.test(path)) continue;
+                try {
+                  const { data: signed } = await (supabase as any).storage.from('recordings').createSignedUrl(path, 3600);
+                  const url = signed?.signedUrl || '';
+                  if (url) out.push({ tool, date, paths: { '1x': url, '2x': url, '5x': url, '10x': url } });
+                } catch {}
+              }
+            }
           }
-        })
-        .catch(() => {});
+          supa = out;
+        } catch {}
+      }
+      if (backendUrl) {
+        try {
+          const r = await fetch(`${backendUrl}/sessions?projectId=${encodeURIComponent(projectId)}`, { mode: 'cors' });
+          const json = await r.json();
+          if (json?.ok && Array.isArray(json.sessions)) {
+            const combined: MergedSession[] = [...(local as any), ...supa, ...(json.sessions as MergedSession[])];
+            setMergedSessions(combined);
+            return;
+          }
+        } catch {}
+      }
+      setMergedSessions([...(supa as any), ...(local as any)]);
     };
 
     refresh();

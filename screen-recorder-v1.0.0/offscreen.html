@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Offscreen Recording Document</title>
+</head>
+<body>
+    <!-- MINIMAL HIDDEN UI - REQUIRED FOR DOM APIS -->
+    <!-- This page must exist for:
+         1. getUserMedia() permission prompt
+         2. MediaRecorder API
+         3. Web Audio API context
+         4. Display Media API (getDisplayMedia)
+    -->
+    <video id="video" style="display: none;"></video>
+    <audio id="audio" style="display: none;"></audio>
+    <canvas id="canvas" style="display: none;"></canvas>
+
+    <script src="offscreen.js" type="module"></script>
+</body>
+</html>

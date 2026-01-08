@@ -1,0 +1,155 @@
+:root {
+  --bg: #0f172a;
+  --panel: #111827;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --accent: #22d3ee;
+  --danger: #f87171;
+  --border: #1f2937;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 12px;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  width: 320px;
+}
+
+.container {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title {
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.5);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.timer {
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  letter-spacing: 1px;
+}
+
+.group {
+  background: #0b1220;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.group-title {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.split {
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+select {
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #0f172a;
+  color: var(--text);
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+button {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #111827;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+}
+
+button.primary {
+  background: linear-gradient(135deg, #22d3ee, #0ea5e9);
+  border: none;
+  color: #0b1220;
+  font-weight: 700;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button:not(:disabled):hover {
+  background: #1f2937;
+}
+
+button.primary:not(:disabled):hover {
+  filter: brightness(1.05);
+}
+
+button:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 12px;
+  min-height: 14px;
+}

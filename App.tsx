@@ -31,16 +31,18 @@ function App() {
   const [showProfileSidebar, setShowProfileSidebar] = useState(false);
   const [showChatSidebar, setShowChatSidebar] = useState(false);
 
-  // Load projects from Supabase (no local storage)
+  // Load projects from Supabase after auth/session is ready
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
+      if (!isSupabaseConfigured) return;
+      if (!auth.currentUser) return; // wait for login/session
       const cloud = await fetchProjects();
       if (!cancelled) setProjects(cloud);
     };
     run();
     return () => { cancelled = true; };
-  }, []);
+  }, [auth.currentUser]);
   
   // Optional: run a quick connectivity check in production
   if (isSupabaseConfigured) {
@@ -99,6 +101,15 @@ function App() {
   const toggleDarkMode = () => {
     setState(prev => ({ ...prev, darkMode: !prev.darkMode }));
   };
+
+  // Gate UI until auth state resolves to avoid flicker to login
+  if (auth.loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <div className="text-slate-500 dark:text-slate-400 font-medium">Loading…</div>
+      </div>
+    );
+  }
 
   if (!auth.currentUser) {
     return <LoginPage onLoginSuccess={() => {}} authHook={auth} />;

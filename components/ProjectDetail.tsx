@@ -320,7 +320,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
               <div className="p-8 space-y-6">
                  {!showConfirmation ? (
                    <>
-                    <textarea value={announcementInput} onChange={(e) => setAnnouncementInput(e.target.value)} placeholder="Define protocol update..." className="w-full h-40 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-base font-medium outline-none resize-none dark:text-white" />
+                    <textarea autoFocus value={announcementInput} onChange={(e) => setAnnouncementInput(e.target.value)} placeholder="Define protocol update..." className="w-full h-40 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-base font-medium outline-none resize-none dark:text-white" />
                     <div className="flex items-center justify-between mt-2 text-xs">
                       <span className="text-slate-500 dark:text-slate-400">{announcementLength} characters</span>
                       {announcementLength > 0 && announcementLength < 2 && (

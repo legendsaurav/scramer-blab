@@ -45,9 +45,11 @@ function App() {
   }, [auth.currentUser]);
   
   // Optional: run a quick connectivity check in production
-  if (isSupabaseConfigured) {
-    diagnoseSupabaseConnectivity();
-  }
+  useEffect(() => {
+    if (isSupabaseConfigured) {
+      diagnoseSupabaseConnectivity();
+    }
+  }, []);
 
   // Dark mode
   useEffect(() => {

@@ -73,9 +73,9 @@
           filename: `session-${Date.now()}.webm`,
           projectId: opts?.projectId || "unknown",
           tool: opts?.tool || "unknown",
-          blobUrl
-          // Alternatively, send the blob directly:
-          // blob
+          blobUrl,
+          // Also send the blob directly to avoid blob: URL fetch issues
+          blob
         });
       } catch {}
     };

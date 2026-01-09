@@ -5,13 +5,13 @@ This app uploads screen recordings to Supabase Storage and saves metadata in Pos
 ## 1) Create Storage bucket
 
 - Name: `recordings`
-- Public: `False` (recommended). We'll use signed URLs or RLS‑controlled access.
+- Public: `True` (globally accessible). We'll use public URLs.
 
 If using SQL (SQL Editor):
 
 ```sql
--- Create bucket
-insert into storage.buckets (id, name, public) values ('recordings', 'recordings', false)
+-- Create public bucket
+insert into storage.buckets (id, name, public) values ('recordings', 'recordings', true)
 on conflict do nothing;
 ```
 
@@ -75,7 +75,7 @@ create policy "recordings.insert.project"
 
 For private buckets, add storage policies that map path → project membership.
 
-We store files as: `recordings/{project_id}/{session_id}/final.webm`
+We store files as: `recordings/{project_id}/{tool}/{YYYY-MM-DD}/{session_id}.webm`
 
 ```sql
 -- Drop then recreate storage policies
@@ -117,8 +117,8 @@ Ensure these are set locally (`.env.local`) and on Vercel.
 ## 6) App behavior
 
 - The extension completes a recording and hands a Blob to the app.
-- The app uploads to Storage path `recordings/{project_id}/{session_id}/final.webm` and inserts a row into `public.recordings`.
-- The UI lists rows from `public.recordings`, creates signed URLs, and groups by tool & date.
+- The app uploads to Storage path `recordings/{project_id}/{tool}/{YYYY-MM-DD}/{session_id}.webm` and inserts a row into `public.recordings`.
+- The UI lists files directly from the `recordings` bucket and uses `getPublicUrl(path)` to render globally accessible links.
 
 ## 7) Optional: Chunk/resumable uploads
 

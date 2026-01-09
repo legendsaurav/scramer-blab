@@ -104,7 +104,7 @@ export const useExtensionBridge = () => {
       const dateFolder = new Date().toISOString().slice(0,10);
       // Storage-only structure: <projectId>/<tool>/<YYYY-MM-DD>/<sessionId>.webm
       const path = `${projectId}/${tool}/${dateFolder}/${sessionId}.webm`;
-      const { error: upErr } = await (supabase as any).storage.from('recordings').upload(path, blob, { contentType: 'video/webm', upsert: false });
+      const { error: upErr } = await (supabase as any).storage.from('recordings').upload(path, blob, { contentType: 'video/webm', upsert: false, cacheControl: '31536000' });
       if (upErr) return false;
       return true;
     } catch {
@@ -155,36 +155,32 @@ export const useExtensionBridge = () => {
             let b: Blob | null = blob || null;
             if (!b && blobUrl) {
               try {
-                const resp = await fetch(blobUrl, { mode: 'cors' });
+                // Fetching a blob: URL should not use CORS mode; Chrome may reject it
+                const resp = await fetch(blobUrl);
                 b = await resp.blob();
+                try { URL.revokeObjectURL(blobUrl); } catch {}
               } catch {}
             }
             if (b) {
+              // Always persist locally for immediate UI availability
+              try {
+                await saveLocalRecording({
+                  id: `${projectId}:${tool}:${Date.now()}`,
+                  projectId,
+                  tool,
+                  date: new Date().toISOString().slice(0,10),
+                  filename,
+                  blob: b
+                });
+              } catch {}
+
               // Prefer Supabase Storage if configured
               const supaOk = await uploadBlobToSupabase(b, filename, projectId, tool);
-              if (supaOk) {
-                // Notify UI to refresh sessions
-                window.postMessage({ type: 'SCHMER_REFRESH_SESSIONS', payload: { projectId } }, '*');
-                return;
-              }
-              // Fallback to custom backend if configured
-              const ok = await uploadBlobToBackend(b, filename, projectId, tool, true);
-              if (ok) {
-                window.postMessage({ type: 'SCHMER_REFRESH_SESSIONS', payload: { projectId } }, '*');
-              } else {
-                // Fallback: persist locally so RecordingStore can render
-                try {
-                  await saveLocalRecording({
-                    id: `${projectId}:${tool}:${Date.now()}`,
-                    projectId,
-                    tool,
-                    date: new Date().toISOString().slice(0,10),
-                    filename,
-                    blob: b
-                  });
-                  window.postMessage({ type: 'SCHMER_REFRESH_SESSIONS', payload: { projectId } }, '*');
-                } catch {
-                  // As a last resort, download the file
+              if (!supaOk) {
+                // Fallback to custom backend if configured
+                const ok = await uploadBlobToBackend(b, filename, projectId, tool, true);
+                if (!ok) {
+                  // As a last resort, trigger browser download
                   const url = URL.createObjectURL(b);
                   const a = document.createElement('a');
                   a.href = url;
@@ -195,6 +191,8 @@ export const useExtensionBridge = () => {
                   URL.revokeObjectURL(url);
                 }
               }
+              // Notify UI to refresh sessions regardless of upload path
+              window.postMessage({ type: 'SCHMER_REFRESH_SESSIONS', payload: { projectId } }, '*');
             }
           } catch {}
         };

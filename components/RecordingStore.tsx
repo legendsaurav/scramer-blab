@@ -41,8 +41,9 @@ const RecordingStore: React.FC<{ projectId: string }> = ({ projectId }) => {
                 const path = `${projectId}/${tool}/${date}/${f.name}`;
                 if (!/\.webm$/i.test(path)) continue;
                 try {
-                  const { data: signed } = await (supabase as any).storage.from('recordings').createSignedUrl(path, 3600);
-                  const url = signed?.signedUrl || '';
+                  // For a public bucket, use a permanent public URL
+                  const { data: pub } = await (supabase as any).storage.from('recordings').getPublicUrl(path);
+                  const url = pub?.publicUrl || '';
                   if (url) out.push({ tool, date, paths: { '1x': url, '2x': url, '5x': url, '10x': url } });
                 } catch {}
               }

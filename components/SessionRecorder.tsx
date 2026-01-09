@@ -63,12 +63,13 @@ const SessionRecorder: React.FC<{ sessions: SoftwareSession[]; projectId: string
   }, [projectId, extensionStatus.isRecording]);
 
   const handleLaunch = (toolId: SoftwareType, url: string) => {
-    if (!extensionStatus.isInstalled) {
-      // In a real app, this would redirect to Chrome Web Store
-      alert("Please install the Schmer Screen Recorder extension to continue.");
-      return;
-    }
+    // Always attempt to start a session. If the extension isn't installed,
+    // useExtensionBridge will fall back to inline recording automatically.
     startSession(toolId, url, projectId);
+    if (!extensionStatus.isInstalled) {
+      // Optional: lightweight notice without blocking recording.
+      console.warn('[schmer] Extension not detected, using inline recording fallback.');
+    }
   };
 
   return (

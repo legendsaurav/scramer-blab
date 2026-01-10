@@ -52,6 +52,10 @@
     const stream = await buildCaptureStream(opts);
     chunks = [];
     capturing = true;
+    // Stamp a start time if not provided
+    if (!opts?.startTime) {
+      try { opts.startTime = Date.now(); } catch {}
+    }
 
     const mime = pickMime();
     try {
@@ -74,6 +78,8 @@
           projectId: opts?.projectId || "unknown",
           tool: opts?.tool || "unknown",
           blobUrl,
+          userId: opts?.userId,
+          startTime: opts?.startTime,
           // Also send the blob directly to avoid blob: URL fetch issues
           blob
         });
@@ -109,7 +115,7 @@
         console.log("[schmer-ext] <- SCHMER_START_RECORDING", msg.payload);
         try {
           await startRecording(msg.payload || {});
-          post("SCHMER_RECORDING_STARTED", { tool: msg.payload?.tool, startTime: Date.now() });
+          post("SCHMER_RECORDING_STARTED", { tool: msg.payload?.tool, userId: msg.payload?.userId, startTime: Date.now() });
         } catch (e) {
           console.error("[schmer-ext] startRecording error", e);
           post("SCHMER_ERROR", { message: String(e?.message || e || "Failed to start recording") });

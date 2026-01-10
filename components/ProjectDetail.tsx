@@ -38,6 +38,39 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   const [isPostingAnnouncement, setIsPostingAnnouncement] = useState(false);
   const [announcementInput, setAnnouncementInput] = useState('');
   const announcementLength = announcementInput.trim().length;
+  // Metrics: default all to zero; compute resources from Supabase if available
+  const [metricsCompletion, setMetricsCompletion] = useState(0);
+  const [metricsTimeHours, setMetricsTimeHours] = useState(0);
+  const [metricsResBytes, setMetricsResBytes] = useState(0);
+  const [metricsErrMsg, setMetricsErrMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchResources = async () => {
+      if (!isSupabaseConfigured || !supabase) { setMetricsErrMsg('Supabase not configured'); return; }
+      try {
+        let total = 0;
+        const tools = SOFTWARE_TOOLS.map(t => t.id as unknown as string);
+        for (const tool of tools) {
+          const { data: dates, error: e1 } = await (supabase as any).storage.from('recordings').list(`${project.id}/${tool}`, { limit: 1000 });
+          if (e1) { setMetricsErrMsg(String(e1.message || e1)); break; }
+          if (!Array.isArray(dates)) continue;
+          for (const d of dates) {
+            const date = (d.name || '').replace(/\/$/, '');
+            const { data: files, error: e2 } = await (supabase as any).storage.from('recordings').list(`${project.id}/${tool}/${date}`, { limit: 1000 });
+            if (e2) { setMetricsErrMsg(String(e2.message || e2)); break; }
+            if (!Array.isArray(files)) continue;
+            for (const f of files) { total += (f?.metadata?.size || f?.size || 0); }
+          }
+        }
+        if (!cancelled) setMetricsResBytes(total);
+      } catch (e: any) {
+        if (!cancelled) setMetricsErrMsg(String(e?.message || e));
+      }
+    };
+    fetchResources();
+    return () => { cancelled = true; };
+  }, [project.id]);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [notification, setNotification] = useState<{message: string, type: 'info' | 'success'} | null>(null);
   const { extensionStatus, startSession } = useExtensionBridge();
@@ -53,8 +86,8 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
-    let subscribed = false;
     let channel: any = null;
+    let cancelled = false;
     const fetchAnnouncements = async () => {
       try {
         const { data, error } = await supabase
@@ -83,45 +116,17 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
               setLiveAnnouncements(prev => [newAnn, ...prev]);
               showNotification('System Broadcast Received', 'info');
             }
-          )
-          .subscribe();
-        subscribed = true;
+          );
+        try { await channel.subscribe(); } catch {}
       } catch {
-        setLiveAnnouncements([]);
+        // ignore; fallback already handled above when error was truthy
       }
     };
-
     fetchAnnouncements();
-
     return () => {
-      if (subscribed && channel) {
-        supabase.removeChannel(channel);
-      }
+      cancelled = true;
+      try { if (channel) supabase.removeChannel(channel); } catch {}
     };
-  }, [project.id]);
-
-  // Fetch meetings and sessions from Supabase for this project
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const [m, s] = await Promise.all([
-          fetchMeetings(project.id),
-          fetchSessions(project.id)
-        ]);
-        if (!cancelled) {
-          setLiveMeetings(m);
-          setLiveSessions(s);
-        }
-      } catch {
-        if (!cancelled) {
-          setLiveMeetings(meetings);
-          setLiveSessions(sessions);
-        }
-      }
-    };
-    load();
-    return () => { cancelled = true; };
   }, [project.id]);
 
   const showNotification = (message: string, type: 'info' | 'success') => {
@@ -230,7 +235,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
           <div className="flex items-center gap-3">
             <Gauge className="text-blue-600" size={18} />
             <div>
-              <div className="text-sm font-semibold">68%</div>
+              <div className="text-sm font-semibold">{metricsCompletion}%</div>
               <div className="text-xs text-slate-500">Completion</div>
             </div>
           </div>
@@ -239,7 +244,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
           <div className="flex items-center gap-3">
             <Clock className="text-blue-600" size={18} />
             <div>
-              <div className="text-sm font-semibold">142h</div>
+              <div className="text-sm font-semibold">{metricsTimeHours}h</div>
               <div className="text-xs text-slate-500">Time Spent</div>
             </div>
           </div>
@@ -248,10 +253,11 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
           <div className="flex items-center gap-3">
             <Database className="text-blue-600" size={18} />
             <div>
-              <div className="text-sm font-semibold">24GB</div>
+              <div className="text-sm font-semibold">{(metricsResBytes > 0 ? (metricsResBytes / (1024*1024*1024)).toFixed(2) : '0')}GB</div>
               <div className="text-xs text-slate-500">Resources</div>
             </div>
           </div>
+          {metricsErrMsg && <div className="mt-2 text-[10px] text-amber-600">{metricsErrMsg}</div>}
         </div>
       </div>
 
@@ -375,7 +381,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
               {SOFTWARE_TOOLS.map(tool => (
                 <button
                   key={tool.id}
-                  onClick={() => startSession(tool.id, tool.url, project.id)}
+                  onClick={() => startSession(tool.id, tool.url, project.id, { userId: currentUser.id })}
                   className="flex flex-col items-center gap-2 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 transition-all"
                   title={tool.name}
                 >

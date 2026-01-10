@@ -102,7 +102,7 @@ const SessionRecorder: React.FC<{ sessions: SoftwareSession[]; projectId: string
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => startSession(SoftwareType.VSCODE, 'https://vscode.dev', 'current-project-id', { debug: true })}
+                onClick={() => startSession(SoftwareType.VSCODE, 'https://vscode.dev', projectId, { debug: true })}
                 className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white"
               >
                 Test Start

@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 // Recharts is loaded lazily via LazyBarChart to avoid early size warnings
 import LazyBarChart from './LazyBarChart';
+import { TEAM_MODE_ALL } from '../constants';
 import { Project, User } from '../types';
 import { 
   Clock, Users, Video, Activity, ArrowRight, Zap, Plus, 
@@ -80,6 +81,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, projects, onSelectProject, 
   const [todayTotalSecs, setTodayTotalSecs] = useState(0);
   const [loadingTelemetry, setLoadingTelemetry] = useState(false);
   const [telemetryError, setTelemetryError] = useState<string | null>(null);
+  const [teamCount, setTeamCount] = useState<number>(0);
+  const [teamProfiles, setTeamProfiles] = useState<User[]>([]);
 
   useEffect(() => {
     const el = chartRef.current;
@@ -108,12 +111,15 @@ const Dashboard: React.FC<DashboardProps> = ({ user, projects, onSelectProject, 
         const todayStart = startOfDayIso(today);
         const todayEnd = endOfDayIso(today);
 
-        const { data, error } = await supabase!
+        let query = supabase!
           .from('sessions')
           .select('date,total_duration,user_id')
-          .eq('user_id', user.id)
           .gte('date', sevenDaysAgoIso)
           .lte('date', todayEnd);
+        if (!TEAM_MODE_ALL) {
+          query = query.eq('user_id', user.id);
+        }
+        const { data, error } = await query;
 
         if (error) {
           setTelemetryError(error.message);
@@ -157,6 +163,45 @@ const Dashboard: React.FC<DashboardProps> = ({ user, projects, onSelectProject, 
     load();
     return () => { cancelled = true; };
   }, [user.id]);
+
+  // Load team members count from profiles
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!isSupabaseConfigured) return;
+      try {
+        const { count, error } = await supabase!
+          .from('profiles')
+          .select('*', { count: 'exact', head: true });
+        if (error) return;
+        if (!cancelled) setTeamCount(count || 0);
+      } catch {}
+    };
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Load team member profiles list
+  useEffect(() => {
+    let cancelled = false;
+    const loadProfiles = async () => {
+      if (!isSupabaseConfigured) return;
+      try {
+        const { data, error } = await supabase!
+          .from('profiles')
+          .select('id,name,email,avatar,role')
+          .order('name', { ascending: true });
+        if (error) return;
+        if (!cancelled) {
+          setTeamProfiles((data || []) as unknown as User[]);
+          // If count was not yet set, derive from list
+          if (!teamCount && Array.isArray(data)) setTeamCount(data.length);
+        }
+      } catch {}
+    };
+    loadProfiles();
+    return () => { cancelled = true; };
+  }, [teamCount]);
 
   const handleQuickCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,7 +250,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, projects, onSelectProject, 
           {[
             { label: 'Active Initiatives', value: projects.length, icon: Cpu, color: 'text-blue-500', bg: 'bg-blue-500/5' },
             { label: 'Weekly Time', value: formatHoursAndMinutes(weeklyTotalSecs), icon: Activity, color: 'text-emerald-500', bg: 'bg-emerald-500/5' },
-            { label: 'Syncing Nodes', value: '01', icon: Users, color: 'text-purple-500', bg: 'bg-purple-500/5' },
+            { label: 'Syncing Nodes', value: String(teamCount).padStart(2, '0'), icon: Users, color: 'text-purple-500', bg: 'bg-purple-500/5' },
             { label: 'Today Time', value: formatHoursAndMinutes(todayTotalSecs), icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/5' },
           ].map((stat, i) => (
             <div key={i} className="glass-card rounded-[2rem] p-8 group hover:tech-border transition-all duration-300">
@@ -335,6 +380,32 @@ const Dashboard: React.FC<DashboardProps> = ({ user, projects, onSelectProject, 
 
           {/* Lateral Telemetry Section */}
           <div className="lg:col-span-4 space-y-10">
+            {/* Team Access Card */}
+            <div className="glass-card rounded-[2.5rem] p-8">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <Users size={14} /> Team Access
+                </h3>
+                <span className="text-[10px] font-bold text-slate-500">{String(teamCount).padStart(2,'0')} Members</span>
+              </div>
+              <div className="space-y-3 max-h-60 overflow-auto pr-1">
+                {teamProfiles.map(p => (
+                  <div key={p.id} className="flex items-center justify-between p-2 rounded-xl border border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <img src={p.avatar} alt={p.name} className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-700 object-cover" />
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">{p.name}</div>
+                        <div className="text-[10px] text-slate-500 truncate">{p.email}</div>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">{p.role || 'MEMBER'}</span>
+                  </div>
+                ))}
+                {teamProfiles.length === 0 && (
+                  <div className="text-[11px] text-slate-500">No team members found.</div>
+                )}
+              </div>
+            </div>
             
             <div className="glass-card rounded-[2.5rem] p-8">
               <div className="flex items-center justify-between mb-10">

@@ -68,3 +68,7 @@ export const MOCK_MEETINGS: MeetingRecording[] = [];
 export const MOCK_SESSIONS: SoftwareSession[] = [];
 export const MOCK_ANNOUNCEMENTS: Announcement[] = [];
 export const MOCK_CHAT: ChatMessage[] = [];
+
+// Team access mode: when true, aggregate metrics across all authenticated users
+// Set via environment: VITE_TEAM_MODE_ALL=true
+export const TEAM_MODE_ALL: boolean = ((import.meta as any)?.env?.VITE_TEAM_MODE_ALL === 'true');

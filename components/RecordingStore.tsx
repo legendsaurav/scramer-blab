@@ -4,7 +4,7 @@ import { SoftwareType } from '../types';
 import ToolIcon from './ToolIcon';
 import { Layers, MonitorPlay, ExternalLink, ChevronDown, DownloadCloud } from 'lucide-react';
 import { toMergedSessions } from '../lib/localRecordingStore';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, diagnoseSupabaseConnectivity } from '../lib/supabase';
 
 type MergedSession = { tool: string; date: string; paths: Record<string,string> };
 
@@ -14,12 +14,23 @@ const RecordingStore: React.FC<{ projectId: string }> = ({ projectId }) => {
   const [expandedTool, setExpandedTool] = useState<string | null>(null);
   const [selected, setSelected] = useState<MergedSession | null>(null);
   const [variant, setVariant] = useState<'1x'|'2x'|'5x'|'10x'>('1x');
+  const [lastUpload, setLastUpload] = useState<{ tool: string; url: string } | null>(null);
+  const [supaStatus, setSupaStatus] = useState<{ ok: boolean; reason?: string; status?: number } | null>(null);
+  const [supaError, setSupaError] = useState<string | null>(null);
 
   useEffect(() => {
     const raw = (import.meta as any)?.env?.VITE_BACKEND_URL as string | undefined;
     const isHttpsPage = typeof window !== 'undefined' && window.location.protocol === 'https:';
     const backendUrl = raw && (isHttpsPage && raw.startsWith('http://') ? undefined : raw);
     if (!projectId) return;
+    // connectivity probe
+    if (isSupabaseConfigured && supabase) {
+      diagnoseSupabaseConnectivity().then(setSupaStatus).catch(() => setSupaStatus({ ok: false, reason: 'probe-failed' } as any));
+      // simple bucket access test
+      (supabase as any).storage.from('recordings').list(projectId, { limit: 1 }).then((res: any) => {
+        if (res?.error) setSupaError(String(res.error.message || res.error));
+      }).catch((e: any) => setSupaError(String(e?.message || e)));
+    }
     const refresh = async () => {
       const local = await toMergedSessions(projectId).catch(() => []);
       let supa: MergedSession[] = [];
@@ -72,6 +83,15 @@ const RecordingStore: React.FC<{ projectId: string }> = ({ projectId }) => {
       if (event.source !== window) return;
       const type = (event.data && event.data.type) || '';
       if (type === 'SCHMER_REFRESH_SESSIONS' || type === 'SCHMER_RECORDING_STOPPED') refresh();
+      if (type === 'SCHMER_UPLOAD_OK') {
+        const u = (event.data && event.data.payload && (event.data.payload as any).publicUrl) || '';
+        const t = (event.data && event.data.payload && (event.data.payload as any).tool) || '';
+        if (u) setLastUpload({ tool: t, url: u });
+      }
+      if (type === 'SCHMER_UPLOAD_ERR') {
+        const msg = (event.data && event.data.payload && (event.data.payload as any).error) || '';
+        if (msg) setSupaError(String(msg));
+      }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
@@ -91,6 +111,29 @@ const RecordingStore: React.FC<{ projectId: string }> = ({ projectId }) => {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-250px)]">
+      {!isSupabaseConfigured && (
+        <div className="lg:col-span-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-amber-700 dark:text-amber-300 text-xs">
+          Supabase not configured. Videos will show from local fallback only.
+        </div>
+      )}
+      {isSupabaseConfigured && supaStatus && !supaStatus.ok && (
+        <div className="lg:col-span-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-amber-700 dark:text-amber-300 text-xs">
+          Supabase connectivity issue{supaStatus.reason ? `: ${supaStatus.reason}` : ''}{supaStatus.status ? ` (HTTP ${supaStatus.status})` : ''}. Check `VITE_SUPABASE_URL` and network/CORS.
+        </div>
+      )}
+      {isSupabaseConfigured && supaError && (
+        <div className="lg:col-span-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-3 text-red-700 dark:text-red-300 text-xs">
+          Supabase error: {supaError}
+        </div>
+      )}
+      {lastUpload && (
+        <div className="lg:col-span-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3 flex items-center justify-between">
+          <div className="text-emerald-700 dark:text-emerald-300 text-xs">
+            Uploaded {lastUpload.tool} • Public URL ready
+          </div>
+          <a href={lastUpload.url} target="_blank" rel="noreferrer" className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white">Open</a>
+        </div>
+      )}
       <div className="lg:col-span-1 space-y-4">
         {toolsOrder.map(toolId => {
           const sessions = grouped.get(toolId as unknown as string) || [];

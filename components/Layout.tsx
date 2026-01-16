@@ -125,7 +125,7 @@ const Layout: React.FC<LayoutProps> = ({
         </aside>
 
         {/* Main */}
-        <div className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-50 dark:bg-slate-950">
+        <div className="flex-1 flex flex-col min-h-screen bg-slate-50 dark:bg-slate-950">
           <header className="h-20 bg-white/70 dark:bg-slate-950/70 backdrop-blur-2xl border-b border-slate-200 dark:border-slate-800/50 flex items-center justify-between px-6 lg:px-10 z-50">
             <div className="flex items-center gap-6">
               <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors">
@@ -153,7 +153,7 @@ const Layout: React.FC<LayoutProps> = ({
             </div>
           </header>
 
-          <main className="flex-1 overflow-hidden relative">
+          <main className="flex-1 overflow-y-auto relative custom-scrollbar">
             {children}
           </main>
         </div>

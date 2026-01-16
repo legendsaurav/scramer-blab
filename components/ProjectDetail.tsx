@@ -43,26 +43,30 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   const [metricsTimeHours, setMetricsTimeHours] = useState(0);
   const [metricsResBytes, setMetricsResBytes] = useState(0);
   const [metricsErrMsg, setMetricsErrMsg] = useState<string | null>(null);
+  const [teamProfiles, setTeamProfiles] = useState<User[]>([]);
+  const [teamCount, setTeamCount] = useState<number>(0);
 
   useEffect(() => {
     let cancelled = false;
     const fetchResources = async () => {
-      if (!isSupabaseConfigured || !supabase) { setMetricsErrMsg('Supabase not configured'); return; }
+      if (!isSupabaseConfigured) { setMetricsErrMsg('Supabase not configured'); return; }
       try {
         let total = 0;
         const tools = SOFTWARE_TOOLS.map(t => t.id as unknown as string);
-        for (const tool of tools) {
-          const { data: dates, error: e1 } = await (supabase as any).storage.from('recordings').list(`${project.id}/${tool}`, { limit: 1000 });
-          if (e1) { setMetricsErrMsg(String(e1.message || e1)); break; }
-          if (!Array.isArray(dates)) continue;
-          for (const d of dates) {
-            const date = (d.name || '').replace(/\/$/, '');
-            const { data: files, error: e2 } = await (supabase as any).storage.from('recordings').list(`${project.id}/${tool}/${date}`, { limit: 1000 });
-            if (e2) { setMetricsErrMsg(String(e2.message || e2)); break; }
-            if (!Array.isArray(files)) continue;
-            for (const f of files) { total += (f?.metadata?.size || f?.size || 0); }
-          }
-        }
+        // Supabase Storage is disabled for recordings; skip bucket-based counts.
+        // The following code has been removed to stop using Supabase Storage for counting files.
+        // for (const tool of tools) {
+        //   const { data: dates, error: e1 } = await (supabase as any).storage.from('recordings').list(`${project.id}/${tool}`, { limit: 1000 });
+        //   if (e1) { setMetricsErrMsg(String(e1.message || e1)); break; }
+        //   if (!Array.isArray(dates)) continue;
+        //   for (const d of dates) {
+        //     const date = (d.name || '').replace(/\/$/, '');
+        //     const { data: files, error: e2 } = await (supabase as any).storage.from('recordings').list(`${project.id}/${tool}/${date}`, { limit: 1000 });
+        //     if (e2) { setMetricsErrMsg(String(e2.message || e2)); break; }
+        //     if (!Array.isArray(files)) continue;
+        //     for (const f of files) { total += (f?.metadata?.size || f?.size || 0); }
+        //   }
+        // }
         if (!cancelled) setMetricsResBytes(total);
       } catch (e: any) {
         if (!cancelled) setMetricsErrMsg(String(e?.message || e));
@@ -133,6 +137,27 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 4000);
   };
+
+  // Load team member profiles similar to Dashboard
+  useEffect(() => {
+    let cancelled = false;
+    const loadProfiles = async () => {
+      if (!isSupabaseConfigured) return;
+      try {
+        const { data, error } = await supabase!
+          .from('profiles')
+          .select('id,name,email,avatar,role')
+          .order('name', { ascending: true });
+        if (error) return;
+        if (!cancelled) {
+          setTeamProfiles((data || []) as unknown as User[]);
+          setTeamCount(Array.isArray(data) ? data.length : 0);
+        }
+      } catch {}
+    };
+    loadProfiles();
+    return () => { cancelled = true; };
+  }, []);
 
   const formatRelative = (iso: string) => {
     const d = new Date(iso);
@@ -264,21 +289,26 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
       {/* Team Access + Phase Status */}
       <div className="px-6 mt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="font-semibold mb-2">Team Access</h3>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold">Team Access</h3>
+            <span className="text-[10px] font-bold text-slate-500">{String(teamCount).padStart(2,'0')} Members</span>
+          </div>
           <div className="space-y-3">
-            {(project.members || []).map((m) => (
-              <div key={m} className="flex items-center justify-between">
+            {(teamProfiles.length > 0 ? teamProfiles : (project.members || []).map((m) => ({ id: m, name: m, email: '', avatar: '', role: 'MEMBER' as any })) ).map((p: any) => (
+              <div key={p.id || p.name} className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <img className="w-8 h-8 rounded-full" src={`https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(m)}`} />
+                  <img className="w-8 h-8 rounded-full" src={p.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(p.name || p.id)}`} />
                   <div>
-                    <div className="text-sm font-medium">{m}</div>
-                    <div className="text-xs text-slate-500">Member</div>
+                    <div className="text-sm font-medium">{p.name || p.id}</div>
+                    <div className="text-xs text-slate-500">{(p.role || 'Member')}</div>
                   </div>
                 </div>
                 <div className="text-emerald-500"><Dot /></div>
               </div>
             ))}
-            {project.members.length === 0 && <p className="text-sm text-slate-500">No members added yet.</p>}
+            {teamProfiles.length === 0 && (project.members || []).length === 0 && (
+              <p className="text-sm text-slate-500">No team members found.</p>
+            )}
           </div>
         </div>
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-gradient-to-br from-blue-600 to-indigo-600 p-4 text-white">
@@ -381,7 +411,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
               {SOFTWARE_TOOLS.map(tool => (
                 <button
                   key={tool.id}
-                  onClick={() => startSession(tool.id, tool.url, project.id, { userId: currentUser.id })}
+                  onClick={() => startSession(tool.id, tool.url, project.id, { userId: currentUser.id, userName: currentUser.name })}
                   className="flex flex-col items-center gap-2 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 transition-all"
                   title={tool.name}
                 >
@@ -410,7 +440,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
   );
 
   return (
-    <div className="h-full flex relative overflow-hidden bg-slate-100 dark:bg-slate-950">
+    <div className="h-full flex relative bg-slate-100 dark:bg-slate-950">
       <div className="flex-1 h-full overflow-hidden relative">
         {!isSupabaseConfigured && (
           <div className="absolute top-0 left-0 right-0 p-4 bg-amber-50 text-amber-700 border-b border-amber-200 text-xs z-20">
@@ -423,8 +453,16 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
           </div>
         )}
         {viewMode === 'DASHBOARD' && <DashboardCenter />}
-        {viewMode === 'MEETINGS' && <div className="h-full p-8 pt-24"><MeetingRepository meetings={liveMeetings} /></div>}
-        {viewMode === 'SESSIONS' && <div className="h-full p-8 pt-24"><RecordingStore projectId={project.id} /></div>}
+        {viewMode === 'MEETINGS' && (
+          <div className="h-full p-8 pt-24 overflow-y-auto">
+            <MeetingRepository meetings={liveMeetings} />
+          </div>
+        )}
+        {viewMode === 'SESSIONS' && (
+          <div className="h-full p-8 pt-24 overflow-y-auto custom-scrollbar">
+            <RecordingStore projectId={project.id} />
+          </div>
+        )}
       </div>
     </div>
   );

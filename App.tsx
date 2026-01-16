@@ -104,6 +104,16 @@ function App() {
     setState(prev => ({ ...prev, darkMode: !prev.darkMode }));
   };
 
+  // Expose current Supabase user globally so recording bridge
+  // can always derive a username for filenames, even when
+  // components forget to pass user info explicitly.
+  useEffect(() => {
+    try {
+      (window as any).SCHMER_CURRENT_USER_ID = auth.currentUser?.id || null;
+      (window as any).SCHMER_CURRENT_USER_NAME = auth.currentUser?.name || null;
+    } catch {}
+  }, [auth.currentUser]);
+
   // Gate UI until auth state resolves to avoid flicker to login
   if (auth.loading) {
     return (

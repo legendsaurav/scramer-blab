@@ -22,8 +22,8 @@ export const SOFTWARE_TOOLS: SoftwareToolConfig[] = [
   { 
     id: SoftwareType.SOLIDWORKS, 
     name: 'SolidWorks', 
-    url: 'https://www.solidworks.com/launch',
-    description: 'Browser-based 3D CAD modeling.',
+    url: 'http://localhost:5000/open-solidworks',
+    description: 'Launch local SolidWorks via launcher.',
     iconBg: 'bg-red-600',
     logoUrl: 'https://cdn.worldvectorlogo.com/logos/solidworks.svg'
   },

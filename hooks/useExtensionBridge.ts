@@ -1,9 +1,61 @@
 import { useState, useEffect, useCallback } from 'react';
-import { saveLocalRecording } from '../lib/localRecordingStore';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
-// Define the message types for type safety
-type ExtensionMessage = 
+function resolveToolSlug(rawTool?: string | null): string {
+  const safeTool = (rawTool || 'unknown').toString().trim();
+  if (!safeTool) return 'unknown';
+
+  const TOOL_FOLDER_MAP: Record<string, string> = {
+    Arduino: 'arduino_idle',
+    AutoCAD: 'autocad',
+    SolidWorks: 'solidworks',
+    MATLAB: 'matlab',
+    'VS Code': 'vscode',
+    Proteus: 'proteus',
+    GitHub: 'github',
+  };
+
+  if (Object.prototype.hasOwnProperty.call(TOOL_FOLDER_MAP, safeTool)) {
+    return TOOL_FOLDER_MAP[safeTool];
+  }
+
+  const lower = safeTool.toLowerCase();
+  const aliases: { slug: string; names: string[] }[] = [
+    { slug: 'arduino_idle', names: ['arduino', 'arduino ide', 'arduino-ide', 'arduino_idle'] },
+    { slug: 'autocad', names: ['autocad', 'auto cad'] },
+    { slug: 'solidworks', names: ['solidworks', 'solid works'] },
+    { slug: 'matlab', names: ['matlab'] },
+    { slug: 'vscode', names: ['vs code', 'vscode', 'visual studio code'] },
+    { slug: 'proteus', names: ['proteus'] },
+    { slug: 'github', names: ['github', 'git hub'] },
+  ];
+
+  for (const entry of aliases) {
+    if (entry.names.some((name) => name === lower)) {
+      return entry.slug;
+    }
+  }
+
+  return lower.replace(/\s+/g, '_');
+}
+
+function buildSessionFilename(userName: string | undefined, rawTool: string | undefined): string {
+  const safeUser = (userName || 'user').toString().trim().toLowerCase();
+  const userSlug = safeUser
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'user';
+
+  const toolSlug = resolveToolSlug(rawTool || 'unknown');
+
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const time = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+
+  return `session-${date}_${time}_${userSlug}_${toolSlug}.webm`;
+}
+
+type ExtensionMessage =
   | { type: 'SCHMER_PONG'; payload?: { version?: string } }
   | { type: 'SCHMER_CONTENT_READY'; payload?: Record<string, any> }
   | { type: 'SCHMER_RECORDING_STARTED'; payload: { tool?: string; software?: string; startTime: number; userId?: string } }
@@ -30,235 +82,224 @@ export const useExtensionBridge = () => {
     isRecording: false,
     currentSession: null,
     error: null,
-    version: undefined
+    version: undefined,
   });
 
-  // Use backend only if scheme is safe for current page (avoid HTTPS→HTTP mixed content)
-  const rawBackend = (import.meta as any)?.env?.VITE_BACKEND_URL as string | undefined;
-  const isHttpsPage = typeof window !== 'undefined' && window.location.protocol === 'https:';
-  const backendUrl = rawBackend && (isHttpsPage && rawBackend.startsWith('http://') ? undefined : rawBackend);
+  // Use a static import.meta.env access so Vite can inline VITE_BACKEND_URL.
+  // If it's not set, fall back to the local backend so uploads still work
+  // without extra env configuration.
+  const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined) || 'http://localhost:3000';
 
-  // Inline recording fallback when extension is not available
   let inlineRecorder: MediaRecorder | null = null;
   let inlineChunks: BlobPart[] = [];
   let inlineStartTime: number | null = null;
+  // Remember the last resolved user identity for the active recording,
+  // so we can attach it to SCHMER_RECORDING_READY payloads that don't
+  // explicitly include userId/userName from the extension bridge.
+  let lastUserId: string | undefined;
+  let lastUserName: string | undefined;
 
-  const startInlineRecording = async (projectId: string, tool: string, userId?: string) => {
+  const startInlineRecording = async (projectId: string, tool: string, userId?: string, userName?: string) => {
     try {
       const display = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
       const stream = new MediaStream();
-      display.getVideoTracks().forEach(t => stream.addTrack(t));
+      display.getVideoTracks().forEach((t) => stream.addTrack(t));
       if (display.getAudioTracks().length) {
-        display.getAudioTracks().forEach(t => stream.addTrack(t));
+        display.getAudioTracks().forEach((t) => stream.addTrack(t));
       } else {
         try {
           const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-          mic.getAudioTracks().forEach(t => stream.addTrack(t));
+          mic.getAudioTracks().forEach((t) => stream.addTrack(t));
         } catch {}
       }
 
       inlineChunks = [];
       inlineStartTime = Date.now();
-      inlineRecorder = new MediaRecorder(stream, MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? { mimeType: 'video/webm;codecs=vp9,opus' } : undefined);
-      inlineRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) inlineChunks.push(e.data); };
+      inlineRecorder = new MediaRecorder(
+        stream,
+        MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+          ? { mimeType: 'video/webm;codecs=vp9,opus' }
+          : undefined,
+      );
+      inlineRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) inlineChunks.push(e.data);
+      };
       inlineRecorder.onstop = () => {
         try {
           const blob = new Blob(inlineChunks, { type: 'video/webm' });
           const blobUrl = URL.createObjectURL(blob);
-          // Reuse the same protocol message so upload path stays identical
-          window.postMessage({ type: 'SCHMER_RECORDING_READY', payload: { filename: `session-${Date.now()}.webm`, projectId, tool, blobUrl, userId, startTime: inlineStartTime || Date.now() } }, '*');
+          const filename = buildSessionFilename(userName, tool);
+          window.postMessage(
+            {
+              type: 'SCHMER_RECORDING_READY',
+              payload: {
+                filename,
+                projectId,
+                tool,
+                blobUrl,
+                userId,
+                userName,
+                startTime: inlineStartTime || Date.now(),
+              },
+            },
+            '*',
+          );
         } catch {}
       };
       inlineRecorder.start(1000);
     } catch (err) {
-      window.postMessage({ type: 'SCHMER_ERROR', payload: { message: 'Failed to start inline recording. ' + String((err as any)?.message || err) } }, '*');
+      window.postMessage(
+        {
+          type: 'SCHMER_ERROR',
+          payload: { message: 'Failed to start inline recording. ' + String((err as any)?.message || err) },
+        },
+        '*',
+      );
     }
   };
 
-  const uploadBlobToBackend = async (blob: Blob, filename: string, projectId: string, tool: string, autoMerge?: boolean) => {
-    if (!backendUrl) return false;
+  const uploadBlobToBackend = async ({
+    blob,
+    filename,
+    projectId,
+    tool,
+    userId,
+    userName,
+    autoMerge,
+  }: {
+    blob: Blob;
+    filename: string;
+    projectId: string;
+    tool: string;
+    userId?: string;
+    userName?: string;
+    autoMerge?: boolean;
+  }): Promise<{ ok: boolean; url?: string }> => {
+    if (!backendUrl) return { ok: false };
     try {
       const form = new FormData();
-      form.append('file', blob, filename);
-      form.append('projectId', projectId);
+      // Minimal contract: just send the blob and IDs; backend handles disk write.
+      form.append('video', blob, filename);
+      form.append('project_id', projectId);
       form.append('tool', tool);
-      form.append('date', new Date().toISOString().slice(0,10));
-      form.append('segment', String(Date.now()));
-      const res = await fetch(`${backendUrl}/upload`, { method: 'POST', body: form, mode: 'cors' });
+      form.append('session_id', crypto.randomUUID());
+      if (userId) form.append('user_id', userId);
+      if (userName) form.append('user_name', userName);
+
+      const res = await fetch(`${backendUrl}/api/upload`, { method: 'POST', body: form, mode: 'cors' });
       const ok = res.ok;
-      if (ok && autoMerge) {
-        await fetch(`${backendUrl}/merge`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ projectId, tool, date: new Date().toISOString().slice(0,10) })
-        });
+      let url: string | undefined;
+      if (ok) {
+        try {
+          const json = await res.json();
+          if (json && typeof json.url === 'string') {
+            url = json.url as string;
+          }
+        } catch {}
       }
-      return ok;
+
+      if (ok && autoMerge) {
+        try {
+          await fetch(`${backendUrl}/merge`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ projectId, tool, date: new Date().toISOString().slice(0, 10) }),
+          });
+        } catch {}
+      }
+      return { ok, url };
     } catch {
-      return false;
+      return { ok: false };
     }
   };
 
-  const uploadBlobToSupabase = async (blob: Blob, filename: string, projectId: string, tool: string): Promise<{ ok: boolean; path?: string; publicUrl?: string; error?: any }> => {
-    try {
-      if (!isSupabaseConfigured || !supabase) return { ok: false };
-      const sessionId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? (crypto as any).randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
-      const dateFolder = new Date().toISOString().slice(0,10);
-      // Storage-only structure: <projectId>/<tool>/<YYYY-MM-DD>/<sessionId>.webm
-      const path = `${projectId}/${tool}/${dateFolder}/${sessionId}.webm`;
-      const { error: upErr } = await (supabase as any).storage.from('recordings').upload(path, blob, { contentType: 'video/webm', upsert: false, cacheControl: '31536000' });
-      if (upErr) return { ok: false, error: upErr };
-      const { data: pub } = await (supabase as any).storage.from('recordings').getPublicUrl(path);
-      return { ok: true, path, publicUrl: pub?.publicUrl };
-    } catch (e) {
-      return { ok: false, error: e };
-    }
-  };
-
-  // Listener for messages FROM the extension (Content Script)
   const handleExtensionMessage = useCallback((event: MessageEvent) => {
-    // Security: Only accept messages from the same window
     if (event.source !== window) return;
-
     const message = event.data as ExtensionMessage;
 
     switch (message.type) {
       case 'SCHMER_PONG':
-        setStatus(prev => ({ ...prev, isInstalled: true, version: (message.payload as any)?.version }));
+        setStatus((prev) => ({ ...prev, isInstalled: true, version: (message.payload as any)?.version }));
         break;
       case 'SCHMER_CONTENT_READY':
-        // Content script is injected and signaling readiness; treat as installed
-        setStatus(prev => ({ ...prev, isInstalled: true }));
+        setStatus((prev) => ({ ...prev, isInstalled: true }));
         break;
-      
       case 'SCHMER_RECORDING_STARTED':
-        setStatus(prev => ({
+        setStatus((prev) => ({
           ...prev,
           isRecording: true,
           error: null,
           currentSession: {
             software: message.payload.tool || message.payload.software || 'unknown',
-            startTime: message.payload.startTime || Date.now()
-          }
+            startTime: message.payload.startTime || Date.now(),
+          },
         }));
         break;
-
       case 'SCHMER_RECORDING_STOPPED':
-        setStatus(prev => ({
-          ...prev,
-          isRecording: false,
-          currentSession: null
-        }));
+        setStatus((prev) => ({ ...prev, isRecording: false, currentSession: null }));
         break;
-
       case 'SCHMER_RECORDING_READY': {
-        const { blob, blobUrl, filename, projectId, tool, userId, startTime } = message.payload as any;
-        const handleUpload = async () => {
+        const { blob, blobUrl, filename, projectId, tool, userId, userName } = message.payload as any;
+        const effectiveUserId = userId || lastUserId;
+        const effectiveUserName = userName || lastUserName;
+        (async () => {
           try {
             let b: Blob | null = blob || null;
             if (!b && blobUrl) {
               try {
-                // Fetching a blob: URL should not use CORS mode; Chrome may reject it
                 const resp = await fetch(blobUrl);
                 b = await resp.blob();
-                try { URL.revokeObjectURL(blobUrl); } catch {}
+                try {
+                  URL.revokeObjectURL(blobUrl);
+                } catch {}
               } catch {}
             }
-            if (b) {
-              // Always persist locally for immediate UI availability
-              try {
-                await saveLocalRecording({
-                  id: `${projectId}:${tool}:${Date.now()}`,
-                  projectId,
-                  tool,
-                  date: new Date().toISOString().slice(0,10),
-                  filename,
-                  blob: b
-                });
-              } catch {}
+            if (!b) return;
 
-              // Prefer Supabase Storage if configured
-              const supaRes = await uploadBlobToSupabase(b, filename, projectId, tool);
-              if (!supaRes.ok) {
-                // Fallback to custom backend if configured
-                const ok = await uploadBlobToBackend(b, filename, projectId, tool, true);
-                if (!ok) {
-                  // As a last resort, trigger browser download
-                  const url = URL.createObjectURL(b);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = filename;
-                  document.body.appendChild(a);
-                  a.click();
-                  a.remove();
-                  URL.revokeObjectURL(url);
-                }
-                try {
-                  window.postMessage({ type: 'SCHMER_UPLOAD_ERR', payload: { projectId, tool, error: String(supaRes.error?.message || supaRes.error || 'Upload failed') } }, '*');
-                } catch {}
-              } else {
-                // Broadcast upload success with public URL for UI/analytics
-                try {
-                  window.postMessage({ type: 'SCHMER_UPLOAD_OK', payload: { projectId, tool, path: supaRes.path, publicUrl: supaRes.publicUrl } }, '*');
-                } catch {}
-                // Insert session metadata for Weekly Time Spent dashboard
-                try {
-                  if (isSupabaseConfigured && supabase) {
-                    const started = typeof startTime === 'number' ? startTime : (status.currentSession?.startTime || Date.now());
-                    const durationSecs = Math.max(1, Math.floor((Date.now() - started) / 1000));
-                    const hh = String(Math.floor(durationSecs / 3600)).padStart(2, '0');
-                    const mm = String(Math.floor((durationSecs % 3600) / 60)).padStart(2, '0');
-                    const ss = String(durationSecs % 60).padStart(2, '0');
-                    const total_duration = `${hh}:${mm}:${ss}`;
-                    const dateIso = new Date().toISOString();
-                    await (supabase as any).from('sessions').insert({
-                      id: (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? (crypto as any).randomUUID() : undefined,
-                      project_id: projectId,
-                      user_id: userId || null,
-                      software: tool,
-                      date: dateIso,
-                      total_duration,
-                      session_count: 1,
-                      status: 'ready'
-                    });
-                  }
-                } catch {}
-              }
-              // Notify UI to refresh sessions regardless of upload path
-              window.postMessage({ type: 'SCHMER_REFRESH_SESSIONS', payload: { projectId } }, '*');
+            const { ok, url } = await uploadBlobToBackend({
+              blob: b,
+              filename,
+              projectId,
+              tool,
+              userId: effectiveUserId,
+              userName: effectiveUserName,
+              autoMerge: true,
+            });
+
+            // No browser download or local saving: just notify UI about success/failure
+            if (ok) {
+              try {
+                window.postMessage({ type: 'SCHMER_UPLOAD_OK', payload: { projectId, tool, url } }, '*');
+              } catch {}
+            } else {
+              try {
+                window.postMessage({ type: 'SCHMER_UPLOAD_ERR', payload: { projectId, tool, error: 'Upload failed' } }, '*');
+              } catch {}
             }
+
+            window.postMessage({ type: 'SCHMER_REFRESH_SESSIONS', payload: { projectId } }, '*');
           } catch {}
-        };
-        handleUpload();
+        })();
         break;
       }
-
       case 'SCHMER_ERROR':
-        setStatus(prev => ({ ...prev, error: message.payload.message }));
+        setStatus((prev) => ({ ...prev, error: message.payload.message }));
         break;
-
       case 'SCHMER_STATUS': {
-        const state = (message.payload && (message.payload as any).state) || undefined;
+        const state = message.payload?.state;
         if (state) {
-          setStatus(prev => ({
-            ...prev,
-            isRecording: state === 'recording',
-          }));
+          setStatus((prev) => ({ ...prev, isRecording: state === 'recording' }));
         }
         break;
       }
-
       case 'SCHMER_RECORDING_STOPPING':
-        setStatus(prev => ({ ...prev, isRecording: false }));
+        setStatus((prev) => ({ ...prev, isRecording: false }));
         break;
     }
   }, []);
 
   useEffect(() => {
     window.addEventListener('message', handleExtensionMessage);
-
-    // Ping the extension repeatedly until we get a Pong
-    // This detects if the extension is installed/active
     const pingInterval = setInterval(() => {
       if (!status.isInstalled) {
         window.postMessage({ type: 'SCHMER_PING' }, '*');
@@ -271,17 +312,84 @@ export const useExtensionBridge = () => {
     };
   }, [handleExtensionMessage, status.isInstalled]);
 
-  const startSession = (software: string, url: string, projectId: string, options?: Record<string, any>) => {
-    // If extension is present, request recording first to preserve user activation
-    if (status.isInstalled) {
-      window.postMessage({ type: 'SCHMER_START_RECORDING', payload: { projectId, tool: software, userId: options?.userId, options: { ...(options || {}), toolUrl: url, openInExtension: false } } }, '*');
-    } else {
-      // Fallback: record inline within the page context
-      startInlineRecording(projectId, software, options?.userId);
+  const startSession = async (software: string, url: string, projectId: string, options?: Record<string, any>) => {
+    // Derive user identity from options, global App-level vars, or Supabase session
+    let userId = options?.userId as string | undefined;
+    let userName = options?.userName as string | undefined;
+
+    try {
+      const anyWin = window as any;
+      if (!userId && anyWin.SCHMER_CURRENT_USER_ID) {
+        userId = String(anyWin.SCHMER_CURRENT_USER_ID || '');
+      }
+      if (!userName && anyWin.SCHMER_CURRENT_USER_NAME) {
+        userName = String(anyWin.SCHMER_CURRENT_USER_NAME || '');
+      }
+    } catch {}
+
+    // Final fallback: query Supabase directly for current user profile
+    if ((!userId || !userName) && isSupabaseConfigured && supabase) {
+      try {
+        const { data: sessionRes } = await supabase.auth.getSession();
+        const u = sessionRes?.session?.user;
+        if (u) {
+          if (!userId) userId = u.id;
+          if (!userName) {
+            const metaName = (u.user_metadata?.full_name as string | undefined) || '';
+            userName = metaName || (u.email ? u.email.split('@')[0] : 'user');
+          }
+        }
+      } catch {}
     }
 
-    // Open the tool tab after we request recording
-    try { window.open(url, '_blank'); } catch {}
+    const effectiveOptions = { ...(options || {}), userId, userName };
+    // Cache on the bridge so we can attach identity to
+    // SCHMER_RECORDING_READY events that don't carry it.
+    lastUserId = userId;
+    lastUserName = userName;
+
+    if (status.isInstalled) {
+      const toolName = (software || '').toLowerCase();
+      const webTools = ['arduino', 'autocad', 'vs code', 'matlab', 'github'];
+      const desktopTools = ['proteus', 'solidworks'];
+      const isWebTool = webTools.some((k) => toolName.includes(k.toLowerCase()));
+      const isDesktopTool = desktopTools.some((k) => toolName.includes(k.toLowerCase()));
+      const displayMode = isWebTool ? 'tab' : isDesktopTool ? 'window' : 'screen';
+
+      window.postMessage(
+        {
+          type: 'SCHMER_START_RECORDING',
+          payload: {
+            projectId,
+            tool: software,
+            userId,
+            userName,
+            options: { ...effectiveOptions, toolUrl: url, openInExtension: false, displayMode },
+          },
+        },
+        '*',
+      );
+    } else {
+      startInlineRecording(projectId, software, userId, userName);
+    }
+
+    try {
+      if (typeof url === 'string' && /^https?:\/\/localhost(?::\d+)?\/open-solidworks(\/?|$)/.test(url)) {
+        fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+          .then(async (res) => {
+            if (!res.ok) {
+              const body = await res.json().catch(() => ({} as any));
+              const msg = (body as any)?.error || 'Failed to open SolidWorks';
+              alert(msg);
+            }
+          })
+          .catch(() => {
+            alert('SolidWorks launcher not running on localhost');
+          });
+      } else {
+        window.open(url, '_blank');
+      }
+    } catch {}
   };
 
   const stopSession = () => {
@@ -289,14 +397,12 @@ export const useExtensionBridge = () => {
       window.postMessage({ type: 'SCHMER_STOP_RECORDING' }, '*');
     }
     if (inlineRecorder) {
-      try { inlineRecorder.stop(); } catch {}
+      try {
+        inlineRecorder.stop();
+      } catch {}
       inlineRecorder = null;
     }
   };
 
-  return {
-    extensionStatus: status,
-    startSession,
-    stopSession
-  };
+  return { extensionStatus: status, startSession, stopSession };
 };

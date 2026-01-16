@@ -1,6 +1,14 @@
 # Supabase Storage + Metadata Setup
 
-This app uploads screen recordings to Supabase Storage and saves metadata in Postgres. Follow these steps to enable it end‑to‑end.
+This app stores recordings in a simple, human‑readable folder structure so teams can understand where data lives at a glance.
+
+**Storage model overview**
+- Bucket: `recordings`
+- Path format: `recordings/{project_id}/{tool}/{YYYY-MM-DD}/{session_id}.webm`
+- Example: `recordings/PRJ-123/SolidWorks/2026-01-12/6c1d2c66-1e78-4b9a-9c73.webm`
+- Metadata row (optional): records `project_id`, `tool`, `storage_path`, `filename`, `size`, `created_by`, `created_at` in Postgres.
+
+Follow these steps to enable it end‑to‑end.
 
 ## 1) Create Storage bucket
 

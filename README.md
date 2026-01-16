@@ -63,3 +63,64 @@ Frontend dev:
 ```powershell
 npm run dev
 ```
+
+## SolidWorks Local Launcher
+
+This app can trigger SolidWorks on a Windows laptop via a minimal localhost launcher. The website never opens any .exe directly.
+
+### Launcher (Python + Flask)
+
+File: [backend/solidworks_launcher.py](backend/solidworks_launcher.py)
+
+Features:
+- Stores SLDWORKS.exe path in %APPDATA%/SolidWorksLauncher/config.json.
+- Endpoint http://localhost:5000/open-solidworks opens SolidWorks.
+- Optional POST /configure sets the path: { "path": "C:\\Program Files\\SOLIDWORKS Corp\\SOLIDWORKS\\SLDWORKS.exe" }.
+
+Run locally (Python 3.10+):
+
+```powershell
+python -m pip install flask
+python backend/solidworks_launcher.py
+```
+
+### Build Windows .exe (hide console)
+
+```powershell
+python -m pip install pyinstaller flask
+pyinstaller --onefile --noconsole --name SolidWorksLauncher backend/solidworks_launcher.py
+```
+
+The executable will be in dist/SolidWorksLauncher.exe and runs without a console window.
+
+Alternative (without PyInstaller): run via pythonw to hide console:
+
+```powershell
+pythonw backend/solidworks_launcher.py
+```
+
+### Configure SolidWorks Path
+
+Either edit %APPDATA%/SolidWorksLauncher/config.json manually:
+
+```json
+{ "solidworksPath": "C:\\Program Files\\SOLIDWORKS Corp\\SOLIDWORKS\\SLDWORKS.exe" }
+```
+
+Or POST to the launcher:
+
+```powershell
+Invoke-WebRequest -Method POST -ContentType application/json -Body '{"path":"C:\\Program Files\\SOLIDWORKS Corp\\SOLIDWORKS\\SLDWORKS.exe"}' http://localhost:5000/configure
+```
+
+### Website Button (HTML + JS demo)
+
+File: [solidworks-demo.html](solidworks-demo.html)
+
+Behavior:
+- Clicking the button sends POST to http://localhost:5000/open-solidworks.
+- Shows an error if SolidWorks is not configured or if the launcher is not running.
+
+### React Integration
+
+Clicking the SolidWorks icon in the app now calls the local launcher via http://localhost:5000/open-solidworks. If the launcher is offline, you'll see a simple alert.

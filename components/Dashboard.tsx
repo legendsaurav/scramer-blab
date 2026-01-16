@@ -160,8 +160,19 @@ const Dashboard: React.FC<DashboardProps> = ({ user, projects, onSelectProject, 
         if (!cancelled) setLoadingTelemetry(false);
       }
     };
+    const loadRef = { load };
     load();
-    return () => { cancelled = true; };
+
+    // Refresh metrics when a new recording is ready/uploaded
+    const onMsg = (event: MessageEvent) => {
+      if (event.source !== window) return;
+      const type = (event.data && event.data.type) || '';
+      if (type === 'SCHMER_UPLOAD_OK' || type === 'SCHMER_RECORDING_STOPPED' || type === 'SCHMER_REFRESH_SESSIONS') {
+        loadRef.load();
+      }
+    };
+    window.addEventListener('message', onMsg);
+    return () => { cancelled = true; window.removeEventListener('message', onMsg); };
   }, [user.id]);
 
   // Load team members count from profiles

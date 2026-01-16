@@ -4,12 +4,35 @@
 // Responsibilities:
 // 1. Create/destroy offscreen document
 // 2. Coordinate messages between popup and offscreen
-// 3. Handle file downloads
+// 3. Handle file persistence (upload to backend)
 // 4. Maintain recording state in storage
 //
 // WHY NOT IN POPUP:
-// Popup closes → service worker stays alive → recording continues
+// Popup closes > service worker stays alive > recording continues
 // ============================================
+
+// Backend API base used when no Schmer page is active.
+// This should point at the same backend as VITE_BACKEND_URL.
+const BACKEND_URL = 'http://localhost:3000';
+
+// Best-effort guess of which engineering tool is being recorded
+// based on the current active tab URL. This lets standalone
+// recordings land in the same arduino_idle/autocad/... folders
+// as Schmer-integrated recordings.
+function guessToolFromUrl(url) {
+  if (!url || typeof url !== 'string') return 'Screen Recorder';
+  const u = url.toLowerCase();
+
+  if (u.includes('arduino.cc')) return 'Arduino';
+  if (u.includes('web.autocad.com') || u.includes('autocad.com')) return 'AutoCAD';
+  if (u.includes('solidworks')) return 'SolidWorks';
+  if (u.includes('mathworks.com') || u.includes('matlab.')) return 'MATLAB';
+  if (u.includes('vscode.dev')) return 'VS Code';
+  if (u.includes('github.com')) return 'GitHub';
+  if (u.includes('labcenter.com') || u.includes('proteus')) return 'Proteus';
+
+  return 'Screen Recorder';
+}
 
 let offscreenPort = null;
 // Schmer session state (in-memory; minimal persistence kept in storage for UI consistency)
@@ -18,6 +41,8 @@ const schmerSession = {
   tabId: null,
   projectId: null,
   tool: null,
+  userId: null,
+  userName: null,
   autoPaused: false,
   toolTabId: null,
   expectedToolUrl: null
@@ -212,15 +237,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         schmerSession.active = true;
         schmerSession.projectId = message.projectId || null;
         schmerSession.tool = message.tool || null;
+        schmerSession.userId = message.userId || null;
+        schmerSession.userName = message.userName || null;
         schmerSession.autoPaused = false;
         schmerSession.toolTabId = null;
 
-        // Default recording options suitable for cross-app work
-        // Enforce microphone OFF at all times per requirement
+        // Decide display mode based on tool type
+        const toolName = (message.tool || '').toLowerCase();
+        const isWebTool = ['arduino', 'autoCAD', 'vs code', 'matlab', 'github'].some(k => toolName.includes(k.toLowerCase()));
+        const isDesktopTool = ['proteus', 'solidworks'].some(k => toolName.includes(k.toLowerCase()));
+
+        // Default recording options
         const startMsg = {
-          displayMode: (message.options && message.options.displayMode) || 'screen',
+          displayMode: isWebTool ? 'tab' : (isDesktopTool ? 'window' : ((message.options && message.options.displayMode) || 'screen')),
           includeAudio: (message.options && message.options.includeAudio) !== false,
-          includeMicrophone: false
+          includeMicrophone: false,
+          targetTabId: null
         };
 
         // Prevent double-start if already recording
@@ -238,6 +270,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const createdTab = await chrome.tabs.create({ url: toolUrl, active: true });
             if (createdTab && typeof createdTab.id === 'number') {
               schmerSession.toolTabId = createdTab.id;
+              // Ensure the window is focused so tabCapture can capture the active tab without a picker
+              if (typeof createdTab.windowId === 'number') {
+                try { await chrome.windows.update(createdTab.windowId, { focused: true }); } catch (e) {}
+              }
             }
           } catch (e) {
             console.warn('[SW] Failed to open tool URL:', e);
@@ -252,15 +288,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               const tabs = await chrome.tabs.query({ url: pattern });
               const match = tabs.find(t => t.url && t.url.startsWith(toolUrl));
               if (match && match.id != null) schmerSession.toolTabId = match.id;
+              if (match && typeof match.windowId === 'number') {
+                try { await chrome.windows.update(match.windowId, { focused: true }); } catch (e) {}
+              }
             } catch (e) {}
           }, 800);
         }
-
-        const resp = await handleStartRecording(startMsg);
+        // If we're in tab mode and have a target tab, start immediately; otherwise fall back
+        let resp;
+        if (startMsg.displayMode === 'tab' && startMsg.targetTabId != null) {
+          resp = await handleStartRecording(startMsg);
+        } else if (startMsg.displayMode === 'tab') {
+          // Fallback: start with user picker if tab id not found yet
+          resp = await handleStartRecording({ ...startMsg, displayMode: 'screen' });
+        } else {
+          resp = await handleStartRecording(startMsg);
+        }
 
         // Persist basic session metadata for resilience
         if (chrome.storage && chrome.storage.local) {
-          await chrome.storage.local.set({ schmerSession: { active: true, projectId: schmerSession.projectId, tool: schmerSession.tool, tabId: schmerSession.tabId } });
+          await chrome.storage.local.set({
+            schmerSession: {
+              active: true,
+              projectId: schmerSession.projectId,
+              tool: schmerSession.tool,
+              userId: schmerSession.userId,
+              userName: schmerSession.userName,
+              tabId: schmerSession.tabId
+            }
+          });
         }
         sendResponse(resp);
       } catch (e) {
@@ -425,7 +481,9 @@ async function handleRecordingStopped(message) {
         blobUrl, // provide as fallback for page-side upload
         filename,
         projectId: schmerSession.projectId,
-        tool: schmerSession.tool
+        tool: schmerSession.tool,
+        userId: schmerSession.userId,
+        userName: schmerSession.userName
       }).catch(() => {});
 
       // Notify stopped
@@ -434,14 +492,72 @@ async function handleRecordingStopped(message) {
         payload: { filename }
       }).catch(() => {});
     } else {
-      // Fallback to local download behavior
-      console.log('[SW] No active Schmer session, downloading file.');
-      const downloadId = await chrome.downloads.download({
-        url: blobUrl,
-        filename: filename,
-        saveAs: false
-      });
-      console.log('[SW] Download started with ID:', downloadId);
+      // No active Schmer session: prefer backend upload, but fall back to download.
+      console.log('[SW] No active Schmer session, uploading to backend.');
+      let uploadedToBackend = false;
+      try {
+        // Fetch the blob from the offscreen document
+        const res = await fetch(blobUrl);
+        const blob = await res.blob();
+
+        // Try to infer which tool is being recorded from the active tab URL
+        let inferredTool = 'Screen Recorder';
+        try {
+          const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+          if (tabs && tabs.length > 0) {
+            inferredTool = guessToolFromUrl(tabs[0].url || '');
+          }
+        } catch (e) {
+          console.warn('[SW] Failed to infer tool from URL:', e);
+        }
+
+        if (BACKEND_URL) {
+          const form = new FormData();
+          form.append('video', blob, filename);
+          // Use a generic project id, but a tool name that
+          // matches the backend TOOL_FOLDER_MAP so files land
+          // under arduino_idle/autocad/... on disk.
+          form.append('project_id', 'global');
+          form.append('tool', inferredTool);
+          try {
+            form.append('session_id', crypto.randomUUID());
+          } catch {
+            // ignore if randomUUID is unavailable
+          }
+
+          const uploadRes = await fetch(`${BACKEND_URL}/api/upload`, {
+            method: 'POST',
+            body: form,
+            mode: 'cors'
+          });
+
+          if (!uploadRes.ok) {
+            console.error('[SW] Backend upload failed:', uploadRes.status, uploadRes.statusText);
+          } else {
+            console.log('[SW] Backend upload successful');
+            uploadedToBackend = true;
+          }
+        } else {
+          console.warn('[SW] BACKEND_URL not set; skipping upload.');
+        }
+      } catch (e) {
+        console.error('[SW] Error during backend upload:', e);
+      }
+
+      // If backend upload failed for any reason, fall back to a local download
+      if (!uploadedToBackend) {
+        try {
+          console.log('[SW] Falling back to local download.');
+          const downloadId = await chrome.downloads.download({
+            url: blobUrl,
+            filename,
+            saveAs: false
+          });
+          console.log('[SW] Download started with ID:', downloadId);
+        } catch (e) {
+          console.error('[SW] Download fallback failed:', e);
+        }
+      }
     }
   } catch (error) {
     console.error('[SW] Post-processing failed:', error);

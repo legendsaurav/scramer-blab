@@ -7,6 +7,60 @@
     try { window.postMessage({ type, payload }, "*"); } catch {}
   }
 
+  function resolveToolSlug(rawTool) {
+    const safeTool = (rawTool || 'unknown').toString().trim();
+    if (!safeTool) return 'unknown';
+
+    const TOOL_FOLDER_MAP = {
+      'Arduino': 'arduino_idle',
+      'AutoCAD': 'autocad',
+      'SolidWorks': 'solidworks',
+      'MATLAB': 'matlab',
+      'VS Code': 'vscode',
+      'Proteus': 'proteus',
+      'GitHub': 'github'
+    };
+
+    if (Object.prototype.hasOwnProperty.call(TOOL_FOLDER_MAP, safeTool)) {
+      return TOOL_FOLDER_MAP[safeTool];
+    }
+
+    const lower = safeTool.toLowerCase();
+    const aliases = [
+      { slug: 'arduino_idle', names: ['arduino', 'arduino ide', 'arduino-ide', 'arduino_idle'] },
+      { slug: 'autocad', names: ['autocad', 'auto cad'] },
+      { slug: 'solidworks', names: ['solidworks', 'solid works'] },
+      { slug: 'matlab', names: ['matlab'] },
+      { slug: 'vscode', names: ['vs code', 'vscode', 'visual studio code'] },
+      { slug: 'proteus', names: ['proteus'] },
+      { slug: 'github', names: ['github', 'git hub'] }
+    ];
+
+    for (const entry of aliases) {
+      if (entry.names.some((name) => name === lower)) {
+        return entry.slug;
+      }
+    }
+
+    return lower.replace(/\s+/g, '_');
+  }
+
+  function buildSessionFilename(userName, rawTool) {
+    const safeUser = (userName || 'user').toString().trim().toLowerCase();
+    const userSlug = safeUser
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'user';
+
+    const toolSlug = resolveToolSlug(rawTool || 'unknown');
+
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const time = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+
+    return `session-${date}_${time}_${userSlug}_${toolSlug}.webm`;
+  }
+
   // Immediately announce presence
   console.log("[schmer-ext] content-script injected");
   post("SCHMER_PONG", { version: "1.0.0" });
@@ -73,12 +127,15 @@
       try {
         const blob = new Blob(chunks, { type: mime || "video/webm" });
         const blobUrl = URL.createObjectURL(blob);
+        const tool = opts?.tool || "unknown";
+        const filename = buildSessionFilename(opts?.userName, tool);
         post("SCHMER_RECORDING_READY", {
-          filename: `session-${Date.now()}.webm`,
+          filename,
           projectId: opts?.projectId || "unknown",
-          tool: opts?.tool || "unknown",
+          tool,
           blobUrl,
           userId: opts?.userId,
+          userName: opts?.userName,
           startTime: opts?.startTime,
           // Also send the blob directly to avoid blob: URL fetch issues
           blob

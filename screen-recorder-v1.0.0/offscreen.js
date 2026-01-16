@@ -92,7 +92,7 @@ async function startRecording(config) {
     recordedChunks = [];
     
     // Get display media (screen/window/tab)
-    const displayStream = await getDisplayMedia(config.displayMode, !!config.includeAudio);
+    const displayStream = await getDisplayStream(config);
     
     // Get microphone if requested
     let micStream = null;
@@ -126,35 +126,79 @@ async function startRecording(config) {
   }
 }
 
-async function getDisplayMedia(displayMode, includeAudio) {
+async function getDisplayStream(config) {
   // displayMode: 'screen', 'window', 'tab'
+  const displayMode = config.displayMode || 'screen';
+  const includeAudio = !!config.includeAudio;
   try {
-    const constraints = {
-      audio: includeAudio ? true : false,
-      video: {
-        frameRate: { ideal: 30, max: 60 }
-      }
-    };
+    if (displayMode === 'tab' && chrome.tabCapture) {
+      // Capture the active tab in the focused window without showing the picker
+      const stream = await new Promise((resolve, reject) => {
+        try {
+          chrome.tabCapture.capture({
+            audio: includeAudio,
+            video: true
+          }, (s) => {
+            if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+            if (!s) return reject(new Error('Failed to capture active tab'));
+            resolve(s);
+          });
+        } catch (e) { reject(e); }
+      });
+      hookStreamEnded(stream);
+      console.log('[OFFSCREEN] Tab capture obtained via tabCapture (active tab)');
+      return stream;
+    }
 
-    const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
-    console.log('[OFFSCREEN] Display media obtained:', displayMode);
-    
-    // Handle stream ending (user clicks stop in browser UI)
-    stream.getTracks().forEach(track => {
-      track.onended = () => {
-        console.log('[OFFSCREEN] User stopped recording from browser UI');
-        // Auto-stop if user clicks browser's stop button
-        stopRecording();
+    if (displayMode === 'window' && chrome.desktopCapture) {
+      // Ask user to pick an application window (Windows desktop apps)
+      const streamId = await new Promise((resolve, reject) => {
+        try {
+          chrome.desktopCapture.chooseDesktopMedia(['window'], (id) => {
+            if (!id) return reject(new Error('Window selection dismissed'));
+            resolve(id);
+          });
+        } catch (e) { reject(e); }
+      });
+      const constraints = {
+        audio: includeAudio ? true : false,
+        video: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: streamId,
+            maxFrameRate: 30
+          }
+        }
       };
-    });
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      hookStreamEnded(stream);
+      console.log('[OFFSCREEN] Window capture obtained via desktopCapture');
+      return stream;
+    }
 
+    // Fallback: standard picker (Tab/Window/Screen)
+    const constraints = {
+      audio: includeAudio,
+      video: { frameRate: { ideal: 30, max: 60 }, preferCurrentTab: displayMode === 'tab' }
+    };
+    const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+    hookStreamEnded(stream);
+    console.log('[OFFSCREEN] Display media obtained via picker:', displayMode);
     return stream;
   } catch (error) {
-    console.error('[OFFSCREEN] getDisplayMedia error:', error);
-    // Normalize common permission dismissal
+    console.error('[OFFSCREEN] getDisplayStream error:', error);
     sendToServiceWorker({ type: 'ERROR', data: (error && (error.name || error.message)) || 'Permission dismissed' });
     throw error;
   }
+}
+
+function hookStreamEnded(stream) {
+  stream.getTracks().forEach(track => {
+    track.onended = () => {
+      console.log('[OFFSCREEN] User stopped recording from browser UI');
+      stopRecording();
+    };
+  });
 }
 
 async function getMicrophoneStream() {

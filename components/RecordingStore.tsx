@@ -3,10 +3,9 @@ import { SOFTWARE_TOOLS } from '../constants';
 import { SoftwareType } from '../types';
 import ToolIcon from './ToolIcon';
 import { Layers, MonitorPlay, ExternalLink, ChevronDown, DownloadCloud } from 'lucide-react';
-import { toMergedSessions } from '../lib/localRecordingStore';
-import { supabase, isSupabaseConfigured, diagnoseSupabaseConnectivity } from '../lib/supabase';
+import { isSupabaseConfigured } from '../lib/supabase';
 
-type MergedSession = { tool: string; date: string; paths: Record<string,string> };
+type MergedSession = { tool: string; date: string; user?: string | null; paths: Record<string,string>; storagePath?: string; size?: number };
 
 
 const RecordingStore: React.FC<{ projectId: string }> = ({ projectId }) => {
@@ -15,54 +14,17 @@ const RecordingStore: React.FC<{ projectId: string }> = ({ projectId }) => {
   const [selected, setSelected] = useState<MergedSession | null>(null);
   const [variant, setVariant] = useState<'1x'|'2x'|'5x'|'10x'>('1x');
   const [lastUpload, setLastUpload] = useState<{ tool: string; url: string } | null>(null);
-  const [supaStatus, setSupaStatus] = useState<{ ok: boolean; reason?: string; status?: number } | null>(null);
+  const [supaStatus] = useState<{ ok: boolean; reason?: string; status?: number } | null>(null);
   const [supaError, setSupaError] = useState<string | null>(null);
 
   useEffect(() => {
-    const raw = (import.meta as any)?.env?.VITE_BACKEND_URL as string | undefined;
-    const isHttpsPage = typeof window !== 'undefined' && window.location.protocol === 'https:';
-    const backendUrl = raw && (isHttpsPage && raw.startsWith('http://') ? undefined : raw);
+    // Use a static import.meta.env access so Vite can inline VITE_BACKEND_URL
+    const backendUrl = import.meta.env.VITE_BACKEND_URL as string | undefined;
     if (!projectId) return;
-    // connectivity probe
-    if (isSupabaseConfigured && supabase) {
-      diagnoseSupabaseConnectivity().then(setSupaStatus).catch(() => setSupaStatus({ ok: false, reason: 'probe-failed' } as any));
-      // simple bucket access test
-      (supabase as any).storage.from('recordings').list(projectId, { limit: 1 }).then((res: any) => {
-        if (res?.error) setSupaError(String(res.error.message || res.error));
-      }).catch((e: any) => setSupaError(String(e?.message || e)));
-    }
     const refresh = async () => {
-      const local = await toMergedSessions(projectId).catch(() => []);
+      // Only backend sessions (E:\server\video) are used as the source of truth.
+      const local: MergedSession[] = [];
       let supa: MergedSession[] = [];
-      if (isSupabaseConfigured && supabase) {
-        try {
-          // Storage-only listing. Path schema: <projectId>/<tool>/<YYYY-MM-DD>/<sessionId>.webm
-          const tools = SOFTWARE_TOOLS.map(t => t.id as unknown as string);
-          const out: MergedSession[] = [];
-          for (const tool of tools) {
-            // list date folders under projectId/tool
-            const { data: dateEntries } = await (supabase as any).storage.from('recordings').list(`${projectId}/${tool}`, { limit: 1000, sortBy: { column: 'name', order: 'desc' } });
-            if (!Array.isArray(dateEntries)) continue;
-            for (const d of dateEntries) {
-              const date = (d.name || '').replace(/\/$/, '');
-              // list files under each date folder
-              const { data: files } = await (supabase as any).storage.from('recordings').list(`${projectId}/${tool}/${date}`, { limit: 1000, sortBy: { column: 'name', order: 'desc' } });
-              if (!Array.isArray(files)) continue;
-              for (const f of files) {
-                const path = `${projectId}/${tool}/${date}/${f.name}`;
-                if (!/\.webm$/i.test(path)) continue;
-                try {
-                  // For a public bucket, use a permanent public URL
-                  const { data: pub } = await (supabase as any).storage.from('recordings').getPublicUrl(path);
-                  const url = pub?.publicUrl || '';
-                  if (url) out.push({ tool, date, paths: { '1x': url, '2x': url, '5x': url, '10x': url } });
-                } catch {}
-              }
-            }
-          }
-          supa = out;
-        } catch {}
-      }
       if (backendUrl) {
         try {
           const r = await fetch(`${backendUrl}/sessions?projectId=${encodeURIComponent(projectId)}`, { mode: 'cors' });
@@ -79,13 +41,19 @@ const RecordingStore: React.FC<{ projectId: string }> = ({ projectId }) => {
 
     refresh();
 
+    // Periodically refresh so that if multiple people are
+    // recording from different machines, new sessions show
+    // up automatically without a manual reload.
+    const intervalId = window.setInterval(refresh, 15000);
+
     const handler = (event: MessageEvent) => {
       if (event.source !== window) return;
       const type = (event.data && event.data.type) || '';
       if (type === 'SCHMER_REFRESH_SESSIONS' || type === 'SCHMER_RECORDING_STOPPED') refresh();
       if (type === 'SCHMER_UPLOAD_OK') {
-        const u = (event.data && event.data.payload && (event.data.payload as any).publicUrl) || '';
-        const t = (event.data && event.data.payload && (event.data.payload as any).tool) || '';
+        const p = (event.data && event.data.payload) || {};
+        const u = (p as any).url || '';
+        const t = (p as any).tool || '';
         if (u) setLastUpload({ tool: t, url: u });
       }
       if (type === 'SCHMER_UPLOAD_ERR') {
@@ -94,7 +62,10 @@ const RecordingStore: React.FC<{ projectId: string }> = ({ projectId }) => {
       }
     };
     window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
+    return () => {
+      window.removeEventListener('message', handler);
+      window.clearInterval(intervalId);
+    };
   }, [projectId]);
 
   const grouped = useMemo(() => {
@@ -110,7 +81,7 @@ const RecordingStore: React.FC<{ projectId: string }> = ({ projectId }) => {
   const toolsOrder = useMemo(() => SOFTWARE_TOOLS.map(t => t.id), []);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-250px)]">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-250px)] overflow-y-auto custom-scrollbar">
       {!isSupabaseConfigured && (
         <div className="lg:col-span-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-amber-700 dark:text-amber-300 text-xs">
           Supabase not configured. Videos will show from local fallback only.
@@ -163,6 +134,9 @@ const RecordingStore: React.FC<{ projectId: string }> = ({ projectId }) => {
                         <div className="text-sm font-medium">{s.date}</div>
                         <span className="text-xs text-slate-500 flex items-center gap-1"><Layers size={10} /> Final</span>
                       </div>
+                      {s.user && (
+                        <div className="mt-1 text-xs text-slate-500">User: {s.user}</div>
+                      )}
                       <div className="mt-1 text-xs font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">1x / 2x / 5x / 10x</div>
                     </div>
                   ))}
@@ -188,7 +162,7 @@ const RecordingStore: React.FC<{ projectId: string }> = ({ projectId }) => {
               <div className="h-20 bg-slate-950 border-t border-slate-800 p-4 flex items-center justify-between">
                 <div className="text-white text-sm font-medium flex items-center gap-2">
                   <ToolIcon type={selected.tool as unknown as SoftwareType} className="w-6 h-6" />
-                  {selected.tool} • {selected.date}
+                  {selected.tool} • {selected.date}{selected.user ? ` • ${selected.user}` : ''}
                 </div>
                 <div className="flex items-center gap-2">
                   {(['1x','2x','5x','10x'] as const).map(v => (
@@ -199,6 +173,15 @@ const RecordingStore: React.FC<{ projectId: string }> = ({ projectId }) => {
                   </a>
                 </div>
               </div>
+              {selected.storagePath && (
+                <div className="bg-slate-900 border-t border-slate-800 px-4 pb-4 text-xs text-slate-400 flex items-center justify-between">
+                  <div className="font-mono truncate mr-2">recordings/{selected.storagePath}</div>
+                  <div className="flex items-center gap-3">
+                    {selected.size ? <span>{(selected.size / (1024*1024)).toFixed(2)} MB</span> : null}
+                    <button onClick={() => { navigator.clipboard?.writeText(`recordings/${selected.storagePath}`); }} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200">Copy Path</button>
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-500">

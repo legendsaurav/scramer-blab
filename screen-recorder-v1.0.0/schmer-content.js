@@ -3,7 +3,7 @@
 
 (function init() {
   const EXTENSION_NS = 'SCHMER';
-  let activeSession = null; // { projectId, tool, source: 'schmer', autoPaused }
+  let activeSession = null; // { projectId, tool, userId, userName, source: 'schmer', autoPaused }
 
   function log(...args) {
     // Comment out to silence
@@ -44,12 +44,21 @@
           break;
         }
         case 'SCHMER_START_RECORDING': {
-          const { projectId, tool, options } = data.payload || {};
-          activeSession = { projectId: projectId || null, tool: tool || null, source: 'schmer', autoPaused: false };
+          const { projectId, tool, userId, userName, options } = data.payload || {};
+          activeSession = {
+            projectId: projectId || null,
+            tool: tool || null,
+            userId: userId || null,
+            userName: userName || null,
+            source: 'schmer',
+            autoPaused: false
+          };
           const resp = await chrome.runtime.sendMessage({
             action: 'SCHMER_START_RECORDING',
             projectId: activeSession.projectId,
             tool: activeSession.tool,
+            userId: activeSession.userId,
+            userName: activeSession.userName,
             options: options || {}
           });
           if (resp?.success) {
@@ -85,10 +94,10 @@
           postToPage('SCHMER_STATUS', message.payload || {});
           break;
         case 'SCHMER_RECORDING_READY': {
-          // message: { blob (Blob)?, blobUrl?, filename, projectId, tool }
+          // message: { blob (Blob)?, blobUrl?, filename, projectId, tool, userId?, userName? }
           try {
-            const { blob, blobUrl, filename, projectId, tool } = message;
-            postToPage('SCHMER_RECORDING_READY', { blob, blobUrl, filename, projectId, tool });
+            const { blob, blobUrl, filename, projectId, tool, userId, userName } = message;
+            postToPage('SCHMER_RECORDING_READY', { blob, blobUrl, filename, projectId, tool, userId, userName });
           } catch (e) {
             postToPage('SCHMER_ERROR', { message: e?.message || 'Failed to deliver recording' });
           }

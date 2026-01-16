@@ -6,7 +6,9 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       server: {
-        port: 3000,
+        // Use a different port than the backend (which runs on 3000)
+        // so you can run both dev servers at the same time.
+        port: 5173,
         host: '0.0.0.0',
       },
       plugins: [react()],

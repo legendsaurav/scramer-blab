@@ -13,6 +13,7 @@ type AuthMode = 'LOGIN' | 'REGISTER' | 'FORGOT_PASSWORD';
 
 const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, authHook }) => {
   const [mode, setMode] = useState<AuthMode>('LOGIN');
+  const [registerSuccess, setRegisterSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hintResult, setHintResult] = useState<string | null>(null);
@@ -36,6 +37,18 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, authHook }) => {
         result = await authHook.login(email, password);
       } else if (mode === 'REGISTER') {
         result = await authHook.register(name, email, password, hint);
+        if (result?.success) {
+          // Show success, then auto-switch to login
+          setRegisterSuccess(true);
+          setTimeout(() => {
+            setRegisterSuccess(false);
+            setMode('LOGIN');
+            setName('');
+            setPassword('');
+            setHint('');
+          }, 1800);
+          return;
+        }
       } else if (mode === 'FORGOT_PASSWORD') {
         const foundHint = await authHook.getPasswordHint(email);
         if (foundHint) {
@@ -64,6 +77,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, authHook }) => {
     setMode(newMode);
     setError(null);
     setHintResult(null);
+    setRegisterSuccess(false);
     // Keep email if switching between login/forgot
   };
 
@@ -79,8 +93,14 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, authHook }) => {
       <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20 pointer-events-none"></div>
 
       {/* Main Card */}
-      <div className="relative z-10 w-full max-w-md p-6">
-        <div className="backdrop-blur-xl bg-slate-900/60 border border-slate-700/50 shadow-2xl rounded-3xl p-8 md:p-10 relative overflow-hidden group">
+      <div className="relative z-10 w-full max-w-md p-6 transition-all duration-700 ease-in-out transform animate-fade-in">
+        <div className={`backdrop-blur-xl bg-slate-900/60 border border-slate-700/50 shadow-2xl rounded-3xl p-8 md:p-10 relative overflow-hidden group transition-all duration-700 ease-in-out ${mode === 'REGISTER' ? 'animate-slide-in-left' : mode === 'LOGIN' ? 'animate-slide-in-right' : ''}`}>
+                    {/* Registration Success Message */}
+                    {registerSuccess && (
+                      <div className="mb-6 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-sm text-center font-medium animate-fade-in-down">
+                        Account created! Redirecting to sign in...
+                      </div>
+                    )}
           
           {/* Top light reflection */}
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-50"></div>
@@ -127,7 +147,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, authHook }) => {
           )}
 
           {/* Form */}
-          {!hintResult && (
+          {!hintResult && !registerSuccess && (
             <form onSubmit={handleSubmit} className="space-y-5">
               
               {/* Name Field (Register Only) */}

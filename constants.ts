@@ -13,19 +13,19 @@ export const SOFTWARE_TOOLS: SoftwareToolConfig[] = [
   },
   { 
     id: SoftwareType.AUTOCAD, 
-    name: 'AutoCAD Web', 
-    url: 'https://web.autocad.com/',
+    name: 'SolidWorks', 
+    url: '',
     description: 'Computer-aided design (CAD) software.',
     iconBg: 'bg-red-700',
-    logoUrl: ''
+    logoUrl: 'https://cdn.worldvectorlogo.com/logos/solidworks.svg'
   },
   { 
     id: SoftwareType.SOLIDWORKS, 
-    name: 'SolidWorks', 
-    url: 'http://localhost:5000/open-solidworks',
+    name: 'AutoCAD Web', 
+    url: 'https://web.autocad.com/',
     description: 'Launch local SolidWorks via launcher.',
     iconBg: 'bg-red-600',
-    logoUrl: 'https://cdn.worldvectorlogo.com/logos/solidworks.svg'
+    logoUrl: ''
   },
   { 
     id: SoftwareType.MATLAB, 

@@ -1,0 +1,9 @@
+V1.0-Dexhand
+
+This archive contains firmware and documentation for the Dexhand V1.0 release.
+
+Files:
+- V1.0-Dexhand-Firmware.bin
+- V1.0-Dexhand-Manual.pdf
+
+Usage: download the files and follow the manual for installation instructions.

@@ -10,6 +10,7 @@ import {
 import MeetingRepository from './MeetingRepository';
 import RecordingStore from './RecordingStore';
 import ToolIcon from './ToolIcon';
+import ResourceViewer from './ResourceViewer';
 import { useExtensionBridge } from '../hooks/useExtensionBridge';
 import { fetchMeetings, fetchSessions } from '../lib/dataRepository';
 
@@ -21,7 +22,7 @@ interface ProjectDetailProps {
   currentUser: User;
 }
 
-type CenterViewMode = 'DASHBOARD' | 'MEETINGS' | 'SESSIONS';
+type CenterViewMode = 'DASHBOARD' | 'MEETINGS' | 'SESSIONS' | 'RESOURCES';
 
 const ProjectDetail: React.FC<ProjectDetailProps> = ({ 
   project, 
@@ -203,6 +204,8 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
     handlePostAnnouncement(`🚀 INSTANT SYNC: ${currentUser.name} requested a priority sync. Join now: ${meetUrl}`);
   };
 
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
   const DashboardCenter = () => (
     <div className="flex flex-col h-full bg-white dark:bg-slate-950 overflow-y-auto">
       {notification && (
@@ -225,13 +228,14 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
           </div>
         </div>
         <div className="mt-4 flex items-center gap-2">
-          {(['OVERVIEW','MEETINGS','SESSIONS'] as const).map(t => (
+          {(['OVERVIEW','MEETINGS','SESSIONS','RESOURCES'] as const).map(t => (
             <button key={t} onClick={() => {
               if (t === 'OVERVIEW') setViewMode('DASHBOARD');
               if (t === 'MEETINGS') setViewMode('MEETINGS');
               if (t === 'SESSIONS') setViewMode('SESSIONS');
+              if (t === 'RESOURCES') setViewMode('RESOURCES');
             }} className={`px-3 py-1.5 rounded-full text-xs font-semibold ${
-              (t === 'OVERVIEW' && viewMode==='DASHBOARD') || (t==='MEETINGS' && viewMode==='MEETINGS') || (t==='SESSIONS' && viewMode==='SESSIONS')
+              (t === 'OVERVIEW' && viewMode==='DASHBOARD') || (t==='MEETINGS' && viewMode==='MEETINGS') || (t==='SESSIONS' && viewMode==='SESSIONS') || (t==='RESOURCES' && viewMode==='RESOURCES')
               ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
             }`}>{t.toLowerCase()}</button>
           ))}
@@ -463,9 +467,115 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({
             <RecordingStore projectId={project.id} />
           </div>
         )}
+          {viewMode === 'RESOURCES' && (
+            <div className="h-full p-8 pt-24 overflow-y-auto">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold text-lg flex items-center gap-2"><Download /> Resources</h3>
+                  <div className="text-sm text-slate-500">{(metricsResBytes > 0 ? (metricsResBytes/(1024*1024)).toFixed(1) : '0')} MB stored</div>
+                </div>
+
+                {/* Resources list loaded from public manifest */}
+                <ResourcesList projectId={project.id} onPreview={(u) => setPreviewUrl(u)} />
+              </div>
+            </div>
+          )}
+
+          {previewUrl && (
+            <ResourceViewer url={previewUrl} onClose={() => setPreviewUrl(null)} />
+          )}
       </div>
     </div>
   );
 };
 
 export default ProjectDetail;
+
+// -------------------- ResourcesList component --------------------
+const ResourcesList: React.FC<{ projectId: string, onPreview?: (url: string) => void }> = ({ projectId, onPreview }) => {
+  const [resources, setResources] = React.useState<{name: string, size: number, url?: string}[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        // manifest is placed at /resources/V1.0-Dexhand/index.json
+        const res = await fetch('/resources/V1.0-Dexhand/index.json');
+        if (!res.ok) throw new Error('Manifest not found');
+        const arr = await res.json();
+        if (cancelled) return;
+        const withUrls = (arr || []).map((a: any) => ({ ...a, url: `/resources/V1.0-Dexhand/${a.name}` }));
+        setResources(withUrls);
+      } catch (e) {
+        setResources([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  const humanSize = (s: number) => {
+    if (!s) return '—';
+    if (s < 1024) return `${s} B`;
+    if (s < 1024*1024) return `${(s/1024).toFixed(1)} KB`;
+    return `${(s/(1024*1024)).toFixed(2)} MB`;
+  };
+
+  if (loading) return <div className="text-sm text-slate-500">Loading resources…</div>;
+  if (resources.length === 0) return <div className="text-sm text-slate-500">No resources available.</div>;
+
+  // Group by top-level folder
+  const groups: Record<string, {name: string, size: number, url?: string}[]> = {};
+  resources.forEach(r => {
+    const parts = r.name.split('/');
+    if (parts.length > 1) {
+      const folder = parts[0];
+      const fileName = parts.slice(1).join('/');
+      groups[folder] = groups[folder] || [];
+      groups[folder].push({ ...r, name: fileName });
+    } else {
+      groups['root'] = groups['root'] || [];
+      groups['root'].push(r);
+    }
+  });
+
+  return (
+    <div className="space-y-3">
+      {Object.keys(groups).map((g) => (
+        <div key={g} className="space-y-2">
+          {g !== 'root' && <div className="text-xs font-bold text-slate-500 uppercase">{g}</div>}
+          <div className="space-y-2">
+            {groups[g].map(r => (
+              <div key={r.name} className="flex items-center justify-between p-3 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-white dark:bg-slate-800 rounded-md flex items-center justify-center border border-slate-200 dark:border-slate-700 text-slate-600">File</div>
+                  <div>
+                    <div className="text-sm font-medium">{r.name}</div>
+                    <div className="text-xs text-slate-500">{humanSize(r.size)}</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <a href={r.url} download className="px-3 py-1.5 rounded-full bg-blue-600 text-white text-xs font-semibold flex items-center gap-2">
+                    <Download size={14} /> Download
+                  </a>
+                  <button onClick={() => {
+                    // build full url for nested file (if grouped)
+                    const folderPrefix = g === 'root' ? '' : `${g}/`;
+                    const fullUrl = r.url && r.url.includes(folderPrefix) ? r.url : `/resources/V1.0-Dexhand/${folderPrefix}${r.name}`;
+                    const isSTL = String(r.name).toLowerCase().endsWith('.stl');
+                    if (isSTL && onPreview) return onPreview(fullUrl);
+                    // non-STL files open in new tab
+                    window.open(fullUrl, '_blank');
+                  }} className="text-xs text-slate-500 hover:text-slate-700">Preview</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};

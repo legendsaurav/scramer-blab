@@ -108,21 +108,7 @@ const ResourceViewer: React.FC<{ url: string; onClose: () => void }> = ({ url, o
       })
       .finally(() => setLoading(false));
 
-    // if mesh isn't added after a short time, add a subtle placeholder so UI isn't blank
-    const placeholderTimeout = setTimeout(() => {
-        if (!mesh) {
-        console.warn('No geometry loaded, adding placeholder box');
-        const boxGeo = new THREE.BoxGeometry(30, 30, 30);
-        const boxMatColor = colorMode === 'blue' ? 0x9ecbff : 0xf5f7fa;
-        const boxMat = new THREE.MeshStandardMaterial({ color: boxMatColor, metalness: 0.02, roughness: 0.6 });
-        mesh = new THREE.Mesh(boxGeo, boxMat);
-        scene.add(mesh);
-        meshRef.current = mesh;
-        camera.position.set(0, 0, 120);
-        controls.target.set(0, 0, 0);
-        controls.update();
-      }
-    }, 300);
+    // No placeholder box — we only render actual geometry when available.
 
     const onResize = () => {
       if (!mountRef.current) return;
@@ -151,7 +137,7 @@ const ResourceViewer: React.FC<{ url: string; onClose: () => void }> = ({ url, o
       window.removeEventListener('resize', onResize);
       controls.dispose();
       renderer.dispose();
-      clearTimeout(placeholderTimeout as any);
+      // no placeholder to clear
       // dispose mesh via meshRef if present
       try {
         const mr = (mountRef as any).__meshRef;

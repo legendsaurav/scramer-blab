@@ -50,7 +50,11 @@ const SessionRecorder: React.FC<{ sessions: SoftwareSession[]; projectId: string
 
   // Fetch merged sessions from backend
   useEffect(() => {
-    const backendUrl = (import.meta as any)?.env?.VITE_BACKEND_URL as string | undefined;
+    let backendUrl = (import.meta as any)?.env?.VITE_BACKEND_URL as string | undefined;
+    // If running on localhost:5173 or localhost:3000, override backendUrl to local backend
+    if ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (window.location.port === '5173' || window.location.port === '3000')) {
+      backendUrl = 'http://localhost:3000';
+    }
     if (!backendUrl || !projectId) return;
     fetch(`${backendUrl}/sessions?projectId=${encodeURIComponent(projectId)}`)
       .then(r => r.json())
@@ -153,7 +157,10 @@ const SessionRecorder: React.FC<{ sessions: SoftwareSession[]; projectId: string
             <div className="flex items-center gap-2">
               <button
                 onClick={() => {
-                  const backendUrl = (import.meta as any)?.env?.VITE_BACKEND_URL as string | undefined;
+                  let backendUrl = (import.meta as any)?.env?.VITE_BACKEND_URL as string | undefined;
+                  if ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (window.location.port === '5173' || window.location.port === '3000')) {
+                    backendUrl = 'http://localhost:3000';
+                  }
                   if (!backendUrl || !projectId) return;
                   // Merge today's clips for all tools (simple trigger)
                   const today = new Date().toISOString().slice(0,10);
